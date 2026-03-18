@@ -9,8 +9,6 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-// アプリ起動時のマイク許可ダイアログ表示に使用する
-import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -101,27 +99,9 @@ export default function MainScreen() {
     })
   ).current;
 
-  // ========== アプリ起動時：マイクと音声認識の許可を先にリクエストする ==========
-  // 起動直後に確認ダイアログを表示することで、初めて使う方が迷わないようにする
-  useEffect(() => {
-    const requestPermissionsOnMount = async () => {
-      try {
-        // Webの場合はこの処理は不要（ブラウザが自動で処理する）
-        if (Platform.OS === "web") return;
-
-        // マイクと音声認識の許可状態を確認する
-        const existing = await ExpoSpeechRecognitionModule.getPermissionsAsync();
-
-        // まだ確認していない場合（初回起動時）のみダイアログを表示する
-        if (existing.status === "undetermined") {
-          await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-        }
-      } catch {
-        // パーミッション確認に失敗してもアプリは続けて起動する
-      }
-    };
-    requestPermissionsOnMount();
-  }, []); // [] = コンポーネントの初回マウント時のみ実行する
+  // ========== アプリ起動時の処理 ==========
+  // マイク許可はWebViewのWeb Speech API開始時にAndroidが自動でダイアログを表示する
+  // （expo-speech-recognitionは使用しないためここでのリクエストは不要）
 
   // ========== 録音状態に応じてアニメーションを制御 ==========
   useEffect(() => {

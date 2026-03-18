@@ -37,14 +37,7 @@
         }
       ],
       "expo-font",
-      "expo-web-browser",
-      [
-        "expo-speech-recognition",
-        {
-          "microphonePermission": "音声を認識して字幕を表示するためにマイクを使用します。",
-          "speechRecognitionPermission": "音声を認識して字幕を表示するために音声認識機能を使用します。"
-        }
-      ]
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
