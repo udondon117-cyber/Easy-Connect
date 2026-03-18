@@ -9,6 +9,9 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
+// Androidのネイティブマイク権限（RECORD_AUDIO）を先にリクエストするために使用する
+// WebViewのWeb Speech APIはこの権限が必要
+import { Audio } from "expo-av";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -179,6 +182,22 @@ export default function MainScreen() {
       setError(null);
       setInterimText("");
       setStatusMessage("認識中...");
+
+      // AndroidのOSレベルのマイク権限（RECORD_AUDIO）を先にリクエストする
+      // これをしないとWebViewのWeb Speech APIが "not-allowed" エラーになる
+      if (Platform.OS !== "web") {
+        try {
+          const { status } = await Audio.requestPermissionsAsync();
+          if (status !== "granted") {
+            setError("⚙️ 設定 → アプリ → Expo Go → 権限 → マイク → 許可");
+            setStatusMessage("マイクボタンを押して開始");
+            return;
+          }
+        } catch {
+          // 権限確認に失敗してもとりあえず続ける
+        }
+      }
+
       speechRef.current?.startListening();
     }
   }, [isListening]);

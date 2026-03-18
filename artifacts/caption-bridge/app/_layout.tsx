@@ -10,6 +10,11 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
+// ベクターアイコンのフォントファイルを明示的に読み込む
+// これを忘れると ⊠（豆腐文字）が表示される
+import Feather from "@expo/vector-icons/Feather";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -28,11 +33,15 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 export default function RootLayout() {
-  // Google Fontsの読み込み（Inter書体）
+  // Google Fonts（Inter書体）とベクターアイコンフォントを同時に読み込む
+  // @expo/vector-icons の各フォントファイルを .font プロパティで指定する
   const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,   // 通常テキスト
-    Inter_600SemiBold,  // 強調テキスト
-    Inter_700Bold,      // タイトル・太字テキスト
+    Inter_400Regular,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    ...Ionicons.font,                // Ioniconsアイコンフォント
+    ...Feather.font,                 // Featherアイコンフォント
+    ...MaterialCommunityIcons.font,  // MaterialCommunityIconsフォント
   });
 
   // フォント読み込み完了後にスプラッシュ画面を隠す
