@@ -9,10 +9,10 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-// Androidのネイティブマイク権限（RECORD_AUDIO）を先にリクエストするために使用する
-// WebViewのWeb Speech APIはこの権限が必要
 import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import SongPopup, { SongInfo } from "@/components/SongPopup";
 import {
   Animated,
   PanResponder,
@@ -60,9 +60,18 @@ export default function MainScreen() {
   // リアルタイム音量レベル（5バンド、0〜1）
   const [audioLevels, setAudioLevels] = useState<number[]>([0.2, 0.3, 0.25, 0.3, 0.2]);
 
+  // ========== 音楽認識の状態 ==========
+  const [showMusicPopup, setShowMusicPopup] = useState(false);
+  const [songInfo, setSongInfo] = useState<SongInfo | null>(null);
+  const [isMusicLoading, setIsMusicLoading] = useState(false);
+  const [musicError, setMusicError] = useState<string | null>(null);
+
   // ========== 参照 ==========
   const scrollRef = useRef<ScrollView>(null);
   const speechRef = useRef<SpeechRecognizerRef>(null);
+  // captionsのrefを保持する（handleSpeechEndのsaveSession呼び出しで使用）
+  // functional updateの中でsaveSessionを呼ぶとsetState-in-renderエラーになるため
+  const captionsRef = useRef<CaptionEntry[]>([]);
 
   // ========== アニメーション値（react-native-reanimated） ==========
   const pulseAnim = useSharedValue(1);
@@ -209,18 +218,23 @@ export default function MainScreen() {
     setError(null);
   }, []);
 
+  // captionsが変わるたびにrefを同期する
+  // これによりhandleSpeechEndでfunctional updateを使わずに最新のcaptionsにアクセスできる
+  useEffect(() => {
+    captionsRef.current = captions;
+  }, [captions]);
+
   // 音声認識終了時の処理（セッションを自動保存する）
+  // 【修正】functional update内でsaveSessionを呼ぶとsetState-in-renderエラーになるため
+  // captionsRefを使って現在値を直接参照する
   const handleSpeechEnd = useCallback(() => {
     setIsListening(false);
     setInterimText("");
     setStatusMessage("マイクボタンを押して開始");
-    // 認識結果がある場合のみ履歴に保存する（captions参照が古いためfunctional update使用）
-    setCaptions((current) => {
-      if (current.length > 0) {
-        saveSession(current);
-      }
-      return current;
-    });
+    const current = captionsRef.current;
+    if (current.length > 0) {
+      saveSession(current);
+    }
   }, [saveSession]);
 
   // 音声認識の結果を受け取る
@@ -275,6 +289,139 @@ export default function MainScreen() {
     const message = messages[err] ?? `音声認識エラー（${err}）。もう一度お試しください`;
     setError(message);
     setStatusMessage("マイクボタンを押して開始");
+  }, []);
+
+  // 音楽認識ボタン：マイクで6秒間音声を録音してACRCloudで曲名を特定する
+  const handleMusicSearch = useCallback(async () => {
+    if (Platform.OS !== "web") {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+    setShowMusicPopup(true);
+    setIsMusicLoading(true);
+    setSongInfo(null);
+    setMusicError(null);
+
+    // 音声認識が動いている場合は一時停止する（マイクを独占させるため）
+    const wasListening = isListening;
+    if (wasListening) {
+      speechRef.current?.stopListening();
+      setIsListening(false);
+    }
+
+    let recording: Audio.Recording | null = null;
+    try {
+      // マイク権限を確認する
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== "granted") {
+        setMusicError("マイクの使用を許可してください");
+        setIsMusicLoading(false);
+        return;
+      }
+
+      // 録音モードに切り替える（iOS: サイレントモードでも録音できるように）
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      // 高品質で録音開始する
+      const { recording: rec } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recording = rec;
+
+      // 6秒間録音する
+      await new Promise<void>((resolve) => setTimeout(resolve, 6000));
+
+      // 録音を停止してファイルを取得する
+      await recording.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+
+      const uri = recording.getURI();
+      if (!uri) throw new Error("録音ファイルの取得に失敗しました");
+
+      // ファイルをbase64に変換してAPIサーバーに送信する
+      // expo-file-system v19 では EncodingType.Base64 の代わりに "base64" 文字列を使用する
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" as any });
+
+      const apiDomain = process.env.EXPO_PUBLIC_DOMAIN;
+      const apiUrl = apiDomain
+        ? `https://${apiDomain}/api-server/api/recognize`
+        : null;
+
+      if (!apiUrl) throw new Error("APIのURLが設定されていません");
+
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioBase64: base64 }),
+      });
+
+      const data = await response.json() as {
+        status?: { code: number; msg: string };
+        metadata?: { music?: Array<{
+          title?: string;
+          artists?: Array<{ name: string }>;
+          album?: { name: string };
+          external_metadata?: {
+            spotify?: { track?: { id: string } };
+            youtube?: { vid: string };
+          };
+          result_from?: number;
+        }> };
+        error?: string;
+        message?: string;
+      };
+
+      if (data.error === "music_not_configured") {
+        setMusicError("音楽認識は要設定です。ACRCloudのAPIキーを管理者に確認してください。");
+      } else if (data.status?.code === 0 && data.metadata?.music?.[0]) {
+        const music = data.metadata.music[0];
+        // ジャケット写真URLはACRCloudが直接返さないためSpotifyのCover APIを使う
+        const spotifyId = music.external_metadata?.spotify?.track?.id;
+        const ytVid = music.external_metadata?.youtube?.vid;
+        setSongInfo({
+          title: music.title ?? "不明な曲",
+          artist: music.artists?.[0]?.name ?? "不明なアーティスト",
+          album: music.album?.name ?? "",
+          // SpotifyのEmbed画像URLからジャケットを取得する
+          coverUrl: spotifyId
+            ? `https://open.spotify.com/embed/track/${spotifyId}`
+            : undefined,
+          spotifyId,
+          youtubeVideoId: ytVid,
+        });
+      } else {
+        setMusicError("曲が見つかりませんでした。もう少し音量を上げて試してください。");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setMusicError(`エラーが発生しました: ${msg}`);
+    } finally {
+      setIsMusicLoading(false);
+      // 録音が開きっぱなしの場合は閉じる
+      if (recording) {
+        try { await recording.stopAndUnloadAsync(); } catch {}
+      }
+      // 音声認識を再開する
+      if (wasListening) {
+        setTimeout(() => {
+          speechRef.current?.startListening();
+          setIsListening(true);
+        }, 500);
+      }
+    }
+  }, [isListening]);
+
+  // 字幕の長押し：その行のテキストをコピーする
+  const handleLongPressCaption = useCallback(async (text: string) => {
+    await Clipboard.setStringAsync(text);
+    if (Platform.OS !== "web") {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }, []);
 
   // コピーボタン：すべての字幕をクリップボードにコピーする
@@ -459,6 +606,15 @@ export default function MainScreen() {
 
         {/* ヘッダー右側のボタン群 */}
         <View style={styles.headerRight}>
+          {/* 音楽認識ボタン（Shazam風） */}
+          <TouchableOpacity
+            style={[styles.headerBtn, styles.musicBtn]}
+            onPress={handleMusicSearch}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.musicBtnIcon}>♪</Text>
+          </TouchableOpacity>
+
           {/* 履歴ボタン */}
           <TouchableOpacity
             style={styles.headerBtn}
@@ -498,9 +654,15 @@ export default function MainScreen() {
             contentContainerStyle={styles.captionScroll}
             showsVerticalScrollIndicator={false}
           >
-            {/* 確定した字幕の一覧 */}
+            {/* 確定した字幕の一覧（長押しでテキストをコピー） */}
             {captions.map((entry) => (
-              <View key={entry.id} style={styles.captionBubble}>
+              <TouchableOpacity
+                key={entry.id}
+                style={styles.captionBubble}
+                onLongPress={() => handleLongPressCaption(entry.text)}
+                delayLongPress={400}
+                activeOpacity={0.8}
+              >
                 <Text
                   style={[
                     styles.captionText,
@@ -523,7 +685,7 @@ export default function MainScreen() {
                     })}
                   </Text>
                 )}
-              </View>
+              </TouchableOpacity>
             ))}
 
             {/* 認識途中のテキスト（薄い色で表示） */}
@@ -655,6 +817,15 @@ export default function MainScreen() {
 
       {/* ===== ステータステキスト ===== */}
       <Text style={styles.statusText}>{statusMessage}</Text>
+
+      {/* ===== 音楽認識ポップアップ ===== */}
+      <SongPopup
+        visible={showMusicPopup}
+        song={songInfo}
+        isLoading={isMusicLoading}
+        errorMessage={musicError}
+        onClose={() => setShowMusicPopup(false)}
+      />
     </View>
   );
 }
@@ -701,6 +872,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  // 音楽認識ボタン（Shazam風に紫にする）
+  musicBtn: {
+    backgroundColor: "#6B21A8",
+    borderColor: "#7C3AED",
+  },
+  musicBtnIcon: {
+    fontSize: 18,
+    color: "#FFFFFF",
+    fontWeight: "bold" as const,
   },
   captionArea: {
     flex: 1,

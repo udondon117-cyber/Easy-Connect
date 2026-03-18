@@ -57,7 +57,8 @@
   },
   "dependencies": {
     "expo-av": "^16.0.8",
-    "expo-clipboard": "^55.0.8",
+    "expo-clipboard": "^8.0.8",
+    "expo-file-system": "^19.0.21",
     "expo-speech-recognition": "^3.1.1",
     "react-native-webview": "^13.16.1"
   }
