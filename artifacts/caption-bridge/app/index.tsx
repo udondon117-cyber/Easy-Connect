@@ -9,6 +9,8 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
+// アプリ起動時のマイク許可ダイアログ表示に使用する
+import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -98,6 +100,28 @@ export default function MainScreen() {
       },
     })
   ).current;
+
+  // ========== アプリ起動時：マイクと音声認識の許可を先にリクエストする ==========
+  // 起動直後に確認ダイアログを表示することで、初めて使う方が迷わないようにする
+  useEffect(() => {
+    const requestPermissionsOnMount = async () => {
+      try {
+        // Webの場合はこの処理は不要（ブラウザが自動で処理する）
+        if (Platform.OS === "web") return;
+
+        // マイクと音声認識の許可状態を確認する
+        const existing = await ExpoSpeechRecognitionModule.getPermissionsAsync();
+
+        // まだ確認していない場合（初回起動時）のみダイアログを表示する
+        if (existing.status === "undetermined") {
+          await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+        }
+      } catch {
+        // パーミッション確認に失敗してもアプリは続けて起動する
+      }
+    };
+    requestPermissionsOnMount();
+  }, []); // [] = コンポーネントの初回マウント時のみ実行する
 
   // ========== 録音状態に応じてアニメーションを制御 ==========
   useEffect(() => {
@@ -547,7 +571,8 @@ export default function MainScreen() {
                   ))}
                 </View>
               ) : (
-                <MaterialCommunityIcons name="microphone" size={34} color="#fff" />
+                // 高齢者向けに大きなマイクアイコン（52px）
+                <MaterialCommunityIcons name="microphone" size={52} color="#fff" />
               )}
             </Pressable>
           </Reanimated.View>
@@ -738,58 +763,59 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  // ===== マイクボタン（高齢者向けに特大サイズ）=====
   micWrapper: {
-    width: 90,
-    height: 90,
+    width: 130,   // 90→130 に拡大（高齢者が押しやすいように）
+    height: 130,
     alignItems: "center",
     justifyContent: "center",
   },
   micGlow: {
     position: "absolute",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 130,
+    height: 130,
+    borderRadius: 65,
   },
   micGlowActive: {
     backgroundColor: Colors.recordingGlow,
     shadowColor: Colors.recordingRed,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
-    shadowRadius: 24,
-    elevation: 12,
+    shadowRadius: 32,    // グロー効果も大きく
+    elevation: 16,
   },
   micGlowIdle: {
     backgroundColor: Colors.accentGlow,
     shadowColor: Colors.accent,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
-    shadowRadius: 20,
-    elevation: 8,
+    shadowRadius: 28,
+    elevation: 12,
   },
   micPulse: {
     position: "absolute",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 130,
+    height: 130,
+    borderRadius: 65,
   },
   micPulseActive: {
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: Colors.recordingRed,
   },
   micPulseIdle: {
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: Colors.accent,
   },
   micBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 110,   // 72→110 に拡大（特大ボタン）
+    height: 110,
+    borderRadius: 55,
     alignItems: "center",
     justifyContent: "center",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 12,
   },
   micBtnIdle: {
     backgroundColor: Colors.accent,
@@ -797,16 +823,17 @@ const styles = StyleSheet.create({
   micBtnActive: {
     backgroundColor: Colors.recordingRed,
   },
+  // 録音中の波形アニメーション（大きなボタンに合わせてサイズアップ）
   waveContainer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    height: 32,
+    gap: 5,
+    height: 50,
   },
   waveBar: {
-    width: 4,
-    height: 28,
-    borderRadius: 3,
+    width: 6,    // 4→6に太く
+    height: 44,  // 28→44に高く
+    borderRadius: 4,
     backgroundColor: "#fff",
   },
   statusText: {

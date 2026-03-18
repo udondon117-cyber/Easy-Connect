@@ -71,15 +71,16 @@ const STORAGE_KEYS = {
 
 // ============================================================
 // デフォルトのアクセシビリティ設定値
+// 高齢者・弱視の方でもすぐ使えるよう、最初から大きく・濃く・太く設定する
 // ============================================================
 const DEFAULT_SETTINGS: AccessibilitySettings = {
-  fontSize: "normal",      // 標準文字サイズ
-  fontBold: false,          // 太字なし
-  textColor: "#FFFFFF",     // 白い文字
-  bgOpacity: 0.85,          // 背景は少し透明
-  highContrast: false,      // ハイコントラストなし
-  showTimestamp: true,      // タイムスタンプあり
-  language: "ja-JP",        // 日本語認識
+  fontSize: "xlarge",       // 【高齢者向け】特大文字サイズ（36pt）をデフォルトに
+  fontBold: true,            // 【高齢者向け】太字をデフォルトでオンに
+  textColor: "#FFFFFF",      // 白い文字
+  bgOpacity: 1.0,            // 【高齢者向け】背景を完全不透明にして最大コントラストを確保
+  highContrast: true,        // 【高齢者向け】ハイコントラストモードをデフォルトでオンに
+  showTimestamp: true,       // タイムスタンプあり
+  language: "ja-JP",         // 日本語認識
 };
 
 // ============================================================
