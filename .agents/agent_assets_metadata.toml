@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "dYI1zzKwAza72OqrlHTdp"
+uri = "file://artifacts/caption-bridge/assets/images/icon_orange.png"
+type = "image"
+title = "パターンA：オレンジ＋黒（現在採用中）"
+
+[[outputs]]
+id = "eLscByJVxP2Mabvo99cuc"
+uri = "file://artifacts/caption-bridge/assets/images/icon_blue.png"
+type = "image"
+title = "パターンB：濃紺＋白"
