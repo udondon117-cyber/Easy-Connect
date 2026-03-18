@@ -175,7 +175,10 @@ const SPEECH_HTML = `<!DOCTYPE html>
     return r;
   }
 
-  function startRecognition(lang) {
+  // androidMode=true のとき getUserMedia を使わずシミュレートモードで波形を出す
+  // 理由：AndroidのWebViewではgetUserMediaとWeb Speech APIが
+  //       同時にマイクを取り合って認識が失敗するため
+  function startRecognition(lang, androidMode) {
     currentLang = lang || 'ja-JP';
     shouldRestart = true;
     try {
@@ -186,7 +189,12 @@ const SPEECH_HTML = `<!DOCTYPE html>
       recognition = buildRecognition(currentLang);
       if (!recognition) return;
       recognition.start();
-      startAudioAnalysis();
+      if (androidMode) {
+        // AndroidはgetUserMediaを呼ばずにダミー波形を使う
+        startSimulatedLevels();
+      } else {
+        startAudioAnalysis();
+      }
     } catch(err) {
       sendMsg({ type: 'error', code: 'start-failed' });
     }
@@ -285,9 +293,9 @@ export const SpeechRecognizer = forwardRef<SpeechRecognizerRef, Props>(
         if (Platform.OS === 'web') {
           startWebSpeech(language, onResult, onStart, onEnd, onError);
         } else {
-          // injectJavaScriptで開始コマンドを送信する
+          // androidMode=true を渡して getUserMedia 競合を防ぐ
           webViewRef.current?.injectJavaScript(
-            `startRecognition('${language || 'ja-JP'}'); true;`
+            `startRecognition('${language || 'ja-JP'}', true); true;`
           );
         }
       },
