@@ -4,9 +4,12 @@
 //
 // 【方針】
 // expo-speech-recognition はExpo Goに含まれないネイティブモジュールのため使用しない。
-// Android WebView は Web Speech API をサポートしているため、
-// react-native-webview を使ってAndroidで確実に動く実装にした。
-// Webプラットフォームではwindow.SpeechRecognitionを直接使用する。
+// react-native-webview の中でWeb Speech APIを動かすことで
+// Expo Goのまま Galaxy (Android) で音声認識を実現する。
+//
+// 【追加機能】
+// Web Audio APIでリアルタイム音量レベルを取得し親コンポーネントへ送信する。
+// Android Web Speech APIはsilenceで自動停止するため自動再起動ロジックを実装。
 // ============================================================
 
 import React, { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
@@ -14,8 +17,10 @@ import { Platform, StyleSheet, View } from "react-native";
 import WebView from "react-native-webview";
 
 // ============================================================
-// WebView内で動くHTML（音声認識エンジン）
-// AndroidのWebViewのWeb Speech APIを利用する
+// WebView内で動くHTMLエンジン
+// - Web Speech API で音声認識
+// - Web Audio API でリアルタイム音量レベル取得
+// - 無音で自動停止した場合は自動再起動
 // ============================================================
 const SPEECH_HTML = `<!DOCTYPE html>
 <html>
@@ -26,86 +31,179 @@ const SPEECH_HTML = `<!DOCTYPE html>
 <body>
 <script>
   var recognition = null;
+  var audioCtx = null;
+  var analyser = null;
+  var levelTimer = null;
+  var shouldRestart = false;
+  var currentLang = 'ja-JP';
   var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   // React Nativeへメッセージを送信する
-  function sendMessage(data) {
-    if (window.ReactNativeWebView) {
-      window.ReactNativeWebView.postMessage(JSON.stringify(data));
-    }
+  function sendMsg(data) {
+    try {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+      }
+    } catch(e) {}
   }
 
-  // 音声認識を開始する
-  function startRecognition(lang) {
-    if (!SpeechRecognition) {
-      sendMessage({ type: 'error', code: 'not-supported' });
-      return;
-    }
+  // ========== 音量レベル取得（Web Audio API）==========
+  function startAudioAnalysis() {
     try {
-      // 既存の認識セッションがあれば先に停止する
+      navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        .then(function(stream) {
+          try {
+            var Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) { startSimulatedLevels(); return; }
+            audioCtx = new Ctx();
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 32;
+            var source = audioCtx.createMediaStreamSource(stream);
+            source.connect(analyser);
+            var buf = new Uint8Array(analyser.frequencyBinCount);
+            levelTimer = setInterval(function() {
+              try {
+                analyser.getByteFrequencyData(buf);
+                var len = buf.length;
+                var step = Math.max(1, Math.floor(len / 5));
+                var bands = [];
+                for (var i = 0; i < 5; i++) {
+                  bands.push(Math.min(1.0, (buf[i * step] || 0) / 180.0));
+                }
+                sendMsg({ type: 'level', bands: bands });
+              } catch(e) {}
+            }, 60);
+          } catch(e) { startSimulatedLevels(); }
+        })
+        .catch(function() { startSimulatedLevels(); });
+    } catch(e) { startSimulatedLevels(); }
+  }
+
+  // getUserMediaが使えない場合はダミーレベルを送信する
+  function startSimulatedLevels() {
+    var base = [0.4, 0.6, 0.8, 0.5, 0.7];
+    levelTimer = setInterval(function() {
+      var bands = base.map(function(b) {
+        return Math.max(0.1, Math.min(1.0, b + (Math.random() - 0.5) * 0.5));
+      });
+      sendMsg({ type: 'level', bands: bands });
+    }, 100);
+  }
+
+  function stopAudioAnalysis() {
+    if (levelTimer) { clearInterval(levelTimer); levelTimer = null; }
+    try { if (audioCtx) { audioCtx.close(); audioCtx = null; } } catch(e) {}
+    analyser = null;
+    // 波形をゼロにリセットする
+    sendMsg({ type: 'level', bands: [0, 0, 0, 0, 0] });
+  }
+
+  // ========== 音声認識 ==========
+  function buildRecognition(lang) {
+    if (!SpeechRecognition) {
+      sendMsg({ type: 'error', code: 'not-supported' });
+      return null;
+    }
+    var r = new SpeechRecognition();
+    r.lang = lang || 'ja-JP';
+    r.continuous = false;       // Android WebViewはcontinuous:trueが不安定なためfalseで自動再起動する
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onstart = function() {
+      sendMsg({ type: 'start' });
+    };
+
+    // 認識終了時：shouldRestartがtrueなら自動的に再起動する
+    r.onend = function() {
+      if (shouldRestart) {
+        // 無音停止後、200ms待ってから再起動する
+        setTimeout(function() {
+          if (shouldRestart) {
+            try {
+              recognition = buildRecognition(currentLang);
+              if (recognition) recognition.start();
+            } catch(e) {
+              sendMsg({ type: 'error', code: 'restart-failed' });
+            }
+          }
+        }, 200);
+      } else {
+        stopAudioAnalysis();
+        sendMsg({ type: 'end' });
+      }
+    };
+
+    r.onerror = function(e) {
+      var code = e.error || 'unknown';
+      // no-speechは無音検出なので再起動するだけにする
+      if (code === 'no-speech') return;
+      // ネットワークエラーは再試行する
+      if (code === 'network' && shouldRestart) {
+        setTimeout(function() {
+          if (shouldRestart) {
+            try {
+              recognition = buildRecognition(currentLang);
+              if (recognition) recognition.start();
+            } catch(ex) {}
+          }
+        }, 1000);
+        return;
+      }
+      sendMsg({ type: 'error', code: code });
+    };
+
+    r.onresult = function(e) {
+      var interim = '';
+      var finalText = '';
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          finalText += t;
+        } else {
+          interim += t;
+        }
+      }
+      if (finalText) {
+        sendMsg({ type: 'result', text: finalText, isFinal: true });
+      }
+      if (interim) {
+        sendMsg({ type: 'result', text: interim, isFinal: false });
+      }
+    };
+
+    return r;
+  }
+
+  function startRecognition(lang) {
+    currentLang = lang || 'ja-JP';
+    shouldRestart = true;
+    try {
       if (recognition) {
         try { recognition.stop(); } catch(e) {}
         recognition = null;
       }
-
-      recognition = new SpeechRecognition();
-      recognition.lang = lang || 'ja-JP';  // 日本語固定
-      recognition.continuous = true;        // 継続認識モード
-      recognition.interimResults = true;    // 途中経過も取得する
-      recognition.maxAlternatives = 1;      // 候補は1件のみ
-
-      // 認識開始イベント
-      recognition.onstart = function() {
-        sendMessage({ type: 'start' });
-      };
-
-      // 認識終了イベント
-      recognition.onend = function() {
-        sendMessage({ type: 'end' });
-      };
-
-      // エラーイベント
-      recognition.onerror = function(e) {
-        sendMessage({ type: 'error', code: e.error || 'unknown' });
-      };
-
-      // 認識結果イベント（途中・確定）
-      recognition.onresult = function(e) {
-        var interim = '';
-        var finalText = '';
-        for (var i = e.resultIndex; i < e.results.length; i++) {
-          var transcript = e.results[i][0].transcript;
-          if (e.results[i].isFinal) {
-            finalText += transcript;
-          } else {
-            interim += transcript;
-          }
-        }
-        if (finalText) {
-          sendMessage({ type: 'result', text: finalText, isFinal: true });
-        }
-        if (interim) {
-          sendMessage({ type: 'result', text: interim, isFinal: false });
-        }
-      };
-
+      recognition = buildRecognition(currentLang);
+      if (!recognition) return;
       recognition.start();
+      startAudioAnalysis();
     } catch(err) {
-      sendMessage({ type: 'error', code: 'start-failed' });
+      sendMsg({ type: 'error', code: 'start-failed' });
     }
   }
 
-  // 音声認識を停止する
   function stopRecognition() {
+    shouldRestart = false;
     if (recognition) {
       try { recognition.stop(); } catch(e) {}
       recognition = null;
     }
-    sendMessage({ type: 'end' });
+    stopAudioAnalysis();
+    sendMsg({ type: 'end' });
   }
 
-  // React Nativeからのメッセージを処理する
-  function handleMessage(data) {
+  // React Nativeからのメッセージを処理する（Android/iOS両対応）
+  function handleMsg(data) {
     try {
       var msg = JSON.parse(data);
       if (msg.type === 'start') {
@@ -116,9 +214,8 @@ const SPEECH_HTML = `<!DOCTYPE html>
     } catch(e) {}
   }
 
-  // Android / iOS それぞれのメッセージ受信に対応する
-  document.addEventListener('message', function(e) { handleMessage(e.data); });
-  window.addEventListener('message', function(e) { handleMessage(e.data); });
+  document.addEventListener('message', function(e) { handleMsg(e.data); });
+  window.addEventListener('message', function(e) { handleMsg(e.data); });
 </script>
 </body>
 </html>`;
@@ -127,33 +224,33 @@ const SPEECH_HTML = `<!DOCTYPE html>
 // 外部から呼び出せる関数の型定義
 // ============================================================
 export interface SpeechRecognizerRef {
-  startListening: () => void; // 音声認識を開始する
-  stopListening: () => void;  // 音声認識を停止する
+  startListening: () => void;
+  stopListening: () => void;
 }
 
 // ============================================================
 // 親コンポーネントから受け取るプロパティの型定義
 // ============================================================
 interface Props {
-  language: string;                                     // 認識する言語コード（例: "ja-JP"）
-  onResult: (text: string, isFinal: boolean) => void;  // 認識結果を受け取るコールバック
-  onStart: () => void;                                  // 認識開始時のコールバック
-  onEnd: () => void;                                    // 認識終了時のコールバック
-  onError: (error: string) => void;                    // エラー発生時のコールバック
+  language: string;
+  onResult: (text: string, isFinal: boolean) => void;
+  onStart: () => void;
+  onEnd: () => void;
+  onError: (error: string) => void;
+  onAudioLevel?: (levels: number[]) => void; // リアルタイム音量レベル（5バンド）
 }
 
 // Webプラットフォーム用のSpeechRecognitionインスタンス
 let webRecognition: any = null;
 
 // ============================================================
-// SpeechRecognizerコンポーネント
-// UIを持たない（またはほぼ非表示の）コンポーネントとして動作する
+// SpeechRecognizerコンポーネント本体
 // ============================================================
 export const SpeechRecognizer = forwardRef<SpeechRecognizerRef, Props>(
-  ({ language, onResult, onStart, onEnd, onError }, ref) => {
+  ({ language, onResult, onStart, onEnd, onError, onAudioLevel }, ref) => {
     const webViewRef = useRef<WebView>(null);
 
-    // ========== WebViewからのメッセージを受け取る ==========
+    // ========== WebViewからのメッセージを処理する ==========
     const handleMessage = useCallback((event: any) => {
       try {
         const msg = JSON.parse(event.nativeEvent.data);
@@ -170,29 +267,30 @@ export const SpeechRecognizer = forwardRef<SpeechRecognizerRef, Props>(
           case 'result':
             if (msg.text) onResult(msg.text, msg.isFinal);
             break;
+          case 'level':
+            // リアルタイム音量レベルを親コンポーネントへ伝える
+            if (onAudioLevel && Array.isArray(msg.bands)) {
+              onAudioLevel(msg.bands);
+            }
+            break;
         }
       } catch {
         // 不正なメッセージは無視する
       }
-    }, [onStart, onEnd, onError, onResult]);
+    }, [onStart, onEnd, onError, onResult, onAudioLevel]);
 
     // ========== 親コンポーネントから呼べる関数を公開する ==========
     useImperativeHandle(ref, () => ({
-
-      // 音声認識を開始する
       startListening: () => {
         if (Platform.OS === 'web') {
-          // Webプラットフォーム：window.SpeechRecognitionを直接使用する
           startWebSpeech(language, onResult, onStart, onEnd, onError);
         } else {
-          // Android/iOS：WebViewにJavaScriptを注入して開始する
+          // injectJavaScriptで開始コマンドを送信する
           webViewRef.current?.injectJavaScript(
             `startRecognition('${language || 'ja-JP'}'); true;`
           );
         }
       },
-
-      // 音声認識を停止する
       stopListening: () => {
         if (Platform.OS === 'web') {
           stopWebSpeech(onEnd);
@@ -202,7 +300,7 @@ export const SpeechRecognizer = forwardRef<SpeechRecognizerRef, Props>(
       },
     }));
 
-    // Webプラットフォームの場合はWebViewは不要（UIなし）
+    // Webプラットフォームはネイティブで動くためWebViewは不要
     if (Platform.OS === 'web') {
       return null;
     }
@@ -212,9 +310,9 @@ export const SpeechRecognizer = forwardRef<SpeechRecognizerRef, Props>(
       <View style={styles.hidden} pointerEvents="none">
         <WebView
           ref={webViewRef}
-          source={{ html: SPEECH_HTML }}
+          source={{ html: SPEECH_HTML, baseUrl: 'https://localhost/' }}
           onMessage={handleMessage}
-          // マイクなどのメディア権限を自動で許可する（Androidのみ有効）
+          // Androidのメディア権限（マイク）を自動で許可する
           onPermissionRequest={(event) => {
             event.nativeEvent.grant(event.nativeEvent.resources);
           }}
@@ -223,6 +321,8 @@ export const SpeechRecognizer = forwardRef<SpeechRecognizerRef, Props>(
           originWhitelist={['*']}
           javaScriptEnabled
           domStorageEnabled
+          // キャッシュを無効にしてHTML変更を即反映させる
+          cacheEnabled={false}
           style={styles.webview}
         />
       </View>
@@ -241,10 +341,7 @@ function startWebSpeech(
   onError: (error: string) => void,
 ) {
   const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-  if (!SR) {
-    onError('not-supported');
-    return;
-  }
+  if (!SR) { onError('not-supported'); return; }
   if (webRecognition) {
     try { webRecognition.stop(); } catch {}
     webRecognition = null;
@@ -279,18 +376,19 @@ function stopWebSpeech(onEnd: () => void) {
 }
 
 const styles = StyleSheet.create({
-  // 画面の外に押し出して完全に非表示にする
+  // 画面外に完全に非表示で配置する（1x1ピクセルで描画は維持）
   hidden: {
     position: 'absolute',
     width: 1,
     height: 1,
     overflow: 'hidden',
-    opacity: 0,
-    top: -100,
-    left: -100,
+    opacity: 0.01,
+    top: -200,
+    left: -200,
   },
   webview: {
     width: 1,
     height: 1,
+    backgroundColor: 'transparent',
   },
 });

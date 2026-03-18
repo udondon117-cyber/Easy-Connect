@@ -54,6 +54,8 @@ export default function MainScreen() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isMiniMode, setIsMiniMode] = useState(false); // ミニオーバーレイモードのフラグ
+  // リアルタイム音量レベル（5バンド、0〜1）
+  const [audioLevels, setAudioLevels] = useState<number[]>([0.2, 0.3, 0.25, 0.3, 0.2]);
 
   // ========== 参照 ==========
   const scrollRef = useRef<ScrollView>(null);
@@ -101,7 +103,15 @@ export default function MainScreen() {
 
   // ========== アプリ起動時の処理 ==========
   // マイク許可はWebViewのWeb Speech API開始時にAndroidが自動でダイアログを表示する
-  // （expo-speech-recognitionは使用しないためここでのリクエストは不要）
+
+  // ========== 音量レベルが来たらwaveAnims（波形バー）をリアルタイムで更新する ==========
+  useEffect(() => {
+    audioLevels.forEach((level, i) => {
+      if (waveAnims[i] !== undefined) {
+        waveAnims[i].value = withTiming(Math.max(0.08, level), { duration: 80 });
+      }
+    });
+  }, [audioLevels]);
 
   // ========== 録音状態に応じてアニメーションを制御 ==========
   useEffect(() => {
@@ -272,6 +282,11 @@ export default function MainScreen() {
     } catch {}
   }, [captions]);
 
+  // WebViewから音量レベルを受け取り、波形バーを更新する
+  const handleAudioLevel = useCallback((levels: number[]) => {
+    setAudioLevels(levels);
+  }, []);
+
   // クリアボタン：字幕をすべて消す
   const handleClear = useCallback(async () => {
     if (Platform.OS !== "web") {
@@ -299,8 +314,10 @@ export default function MainScreen() {
   const hasContent = captions.length > 0 || interimText.length > 0;
 
   // 視認性設定からスタイルを構築する
+  // 日本語テキストを正しく表示するためシステムフォント（fontWeight指定）を使用する
+  // InterフォントはJapanese glyphsを持たないため文字化けの原因になる
   const captionFontSize = getFontSize();
-  const captionFontFamily = settings.fontBold ? "Inter_700Bold" : "Inter_400Regular";
+  const captionFontWeight: "400" | "700" = settings.fontBold ? "700" : "400";
   const captionBgColor = settings.highContrast
     ? `rgba(0, 0, 0, ${settings.bgOpacity})`
     : `rgba(14, 14, 22, ${settings.bgOpacity})`;
@@ -324,6 +341,7 @@ export default function MainScreen() {
           onStart={handleSpeechStart}
           onEnd={handleSpeechEnd}
           onError={handleError}
+          onAudioLevel={handleAudioLevel}
         />
 
         {/* ドラッグ可能な字幕ウィンドウ */}
@@ -350,7 +368,7 @@ export default function MainScreen() {
               {
                 fontSize: Math.min(captionFontSize, 20),
                 color: settings.textColor,
-                fontFamily: captionFontFamily,
+                fontWeight: captionFontWeight,
               },
             ]}
             numberOfLines={3}
@@ -410,6 +428,7 @@ export default function MainScreen() {
         onStart={handleSpeechStart}
         onEnd={handleSpeechEnd}
         onError={handleError}
+        onAudioLevel={handleAudioLevel}
       />
 
       {/* ===== ヘッダー ===== */}
@@ -469,7 +488,7 @@ export default function MainScreen() {
                     {
                       fontSize: captionFontSize,
                       color: settings.textColor,
-                      fontFamily: captionFontFamily,
+                      fontWeight: captionFontWeight,
                     },
                   ]}
                 >
@@ -498,7 +517,7 @@ export default function MainScreen() {
                     {
                       fontSize: captionFontSize,
                       color: settings.textColor,
-                      fontFamily: captionFontFamily,
+                      fontWeight: captionFontWeight,
                       opacity: 0.6,
                     },
                   ]}
@@ -518,6 +537,28 @@ export default function MainScreen() {
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : null}
+
+      {/* ===== 入力源インジケーター ===== */}
+      <View style={styles.sourceBar}>
+        {/* 入力源アイコンとラベル */}
+        <View style={styles.sourceLeft}>
+          <MaterialCommunityIcons
+            name="microphone"
+            size={14}
+            color={isListening ? Colors.recordingRed : Colors.textMuted}
+          />
+          <Text style={[styles.sourceText, isListening && styles.sourceTextActive]}>
+            {isListening ? "マイクから入力中" : "マイク待機中"}
+          </Text>
+        </View>
+        {/* 録音中インジケーター（赤い点滅ドット）*/}
+        {isListening && (
+          <View style={styles.sourceRight}>
+            <View style={styles.recDot} />
+            <Text style={styles.recLabel}>REC</Text>
+          </View>
+        )}
+      </View>
 
       {/* ===== コントロールバー ===== */}
       <View style={styles.controls}>
@@ -818,10 +859,52 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 13,
-    fontFamily: "Inter_400Regular",
     color: Colors.textMuted,
     textAlign: "center",
     paddingBottom: 8,
+  },
+  // ===== 入力源インジケーターバー =====
+  sourceBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 6,
+    borderRadius: 10,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  sourceLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  sourceText: {
+    fontSize: 13,
+    color: Colors.textMuted,
+  },
+  sourceTextActive: {
+    color: Colors.recordingRed,
+    fontWeight: "600",
+  },
+  sourceRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  recDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.recordingRed,
+  },
+  recLabel: {
+    fontSize: 11,
+    color: Colors.recordingRed,
+    fontWeight: "700",
+    letterSpacing: 1,
   },
 
   // ===== ミニオーバーレイモード =====
