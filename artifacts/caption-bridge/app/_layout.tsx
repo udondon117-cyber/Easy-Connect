@@ -2,13 +2,18 @@
 // _layout.tsx
 // 役割：アプリ全体の共通レイアウトを定義するルートファイル
 //       フォント・テーマ・状態管理・ナビゲーション構造を管理する
+//
+// 【フォント読み込みの注意点】
+// @expo-google-fonts/inter の useFonts はスプレッド演算子との
+// 組み合わせが不安定なため、expo-font の useFonts を使用する。
+// ベクターアイコン（Ionicons・Feather・MaterialCommunityIcons）は
+// .font プロパティを使って明示的に読み込む。
 // ============================================================
 
 import {
   Inter_400Regular,
   Inter_600SemiBold,
   Inter_700Bold,
-  useFonts,
 } from "@expo-google-fonts/inter";
 // ベクターアイコンのフォントファイルを明示的に読み込む
 // これを忘れると ⊠（豆腐文字）が表示される
@@ -16,6 +21,8 @@ import Feather from "@expo/vector-icons/Feather";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+// expo-font の汎用 useFonts を使用（スプレッドと相性が良い）
+import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
@@ -33,15 +40,15 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 export default function RootLayout() {
-  // Google Fonts（Inter書体）とベクターアイコンフォントを同時に読み込む
-  // @expo/vector-icons の各フォントファイルを .font プロパティで指定する
+  // expo-font の useFonts でInter書体とベクターアイコンを一括読み込みする
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_600SemiBold,
     Inter_700Bold,
-    ...Ionicons.font,                // Ioniconsアイコンフォント
-    ...Feather.font,                 // Featherアイコンフォント
-    ...MaterialCommunityIcons.font,  // MaterialCommunityIconsフォント
+    // @expo/vector-icons の各フォントファイルをスプレッドで展開する
+    ...Ionicons.font,                // { 'Ionicons': require('...ttf') }
+    ...Feather.font,                 // { 'Feather': require('...ttf') }
+    ...MaterialCommunityIcons.font,  // { 'MaterialCommunityIcons': require('...ttf') }
   });
 
   // フォント読み込み完了後にスプラッシュ画面を隠す

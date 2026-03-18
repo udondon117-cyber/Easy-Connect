@@ -305,14 +305,17 @@ export const SpeechRecognizer = forwardRef<SpeechRecognizerRef, Props>(
       return null;
     }
 
-    // Android/iOS：画面外に配置した非表示WebView
+    // Android/iOS：画面右下の角に透明配置する
+    // 【重要】top:-200 のような画面外配置だとAndroidがマイクを与えない
+    // 画面内（bottom:0, right:0）に100x100で配置してopacity:0で隠す
     return (
       <View style={styles.hidden} pointerEvents="none">
         <WebView
           ref={webViewRef}
           source={{ html: SPEECH_HTML, baseUrl: 'https://localhost/' }}
           onMessage={handleMessage}
-          // Androidのメディア権限（マイク）を自動で許可する
+          // AndroidのWebViewメディア権限（マイク）を自動で許可する
+          // これはネイティブ権限とは別のWebView固有の権限チェック
           onPermissionRequest={(event) => {
             event.nativeEvent.grant(event.nativeEvent.resources);
           }}
@@ -376,19 +379,20 @@ function stopWebSpeech(onEnd: () => void) {
 }
 
 const styles = StyleSheet.create({
-  // 画面外に完全に非表示で配置する（1x1ピクセルで描画は維持）
+  // 画面右下の角にサイズ100x100で透明配置する
+  // 【注意】top:-200等の画面外配置はAndroidがWebViewのマイクを遮断するため禁止
+  // opacity:0で視覚的に隠しつつ、Androidのビュー描画ツリー内に残す
   hidden: {
     position: 'absolute',
-    width: 1,
-    height: 1,
-    overflow: 'hidden',
-    opacity: 0.01,
-    top: -200,
-    left: -200,
+    bottom: 0,
+    right: 0,
+    width: 100,
+    height: 100,
+    opacity: 0,
   },
   webview: {
-    width: 1,
-    height: 1,
+    width: 100,
+    height: 100,
     backgroundColor: 'transparent',
   },
 });
