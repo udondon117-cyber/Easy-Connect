@@ -1,18 +1,17 @@
 // ============================================================
 // settings.tsx
 // 役割：アプリの設定画面
-//       認識言語・文字サイズ・動作設定などを変更できる
+//       認識言語・動作設定・各種機能画面へのリンクを提供する
 // ============================================================
 
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import React from "react";
 import {
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -20,20 +19,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/colors";
+import { useCaptionContext } from "@/contexts/CaptionContext";
 
 // ============================================================
-// 型定義
+// 認識可能な言語の一覧
 // ============================================================
-
-// 認識可能な言語の定義
-type Language = {
-  code: string;   // 言語コード（例: "ja-JP"）
-  label: string;  // 日本語での表示名
-  native: string; // 英語での表示名
-};
-
-// 対応している認識言語のリスト
-const LANGUAGES: Language[] = [
+const LANGUAGES = [
   { code: "ja-JP", label: "日本語", native: "Japanese" },
   { code: "en-US", label: "英語（アメリカ）", native: "English (US)" },
   { code: "zh-CN", label: "中国語（簡体）", native: "Chinese (Simplified)" },
@@ -41,40 +32,21 @@ const LANGUAGES: Language[] = [
   { code: "fr-FR", label: "フランス語", native: "French" },
 ];
 
-// 文字サイズの種類
-type FontSize = "small" | "normal" | "large" | "xlarge";
-
-// 文字サイズの選択肢定義
-const FONT_SIZES: { key: FontSize; label: string; size: number }[] = [
-  { key: "small", label: "小", size: 16 },
-  { key: "normal", label: "中", size: 22 },
-  { key: "large", label: "大", size: 28 },
-  { key: "xlarge", label: "特大", size: 34 },
-];
-
 // ============================================================
 // 設定画面コンポーネント
 // ============================================================
 export default function SettingsScreen() {
-  // 端末の安全な表示エリアの余白を取得
   const insets = useSafeAreaInsets();
+  const { settings, updateSettings, sessions } = useCaptionContext();
 
-  // ========== 設定値の状態管理 ==========
-  const [selectedLang, setSelectedLang] = useState("ja-JP");        // 選択中の言語
-  const [fontSize, setFontSize] = useState<FontSize>("normal");      // 選択中の文字サイズ
-  const [continuousMode, setContinuousMode] = useState(true);        // 継続認識モードのオン/オフ
-  const [showTimestamp, setShowTimestamp] = useState(true);          // タイムスタンプ表示のオン/オフ
-
-  // プラットフォームに応じた上下の余白を計算
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
 
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
 
-      {/* ===== ヘッダーエリア ===== */}
+      {/* ヘッダー */}
       <View style={styles.header}>
-        {/* 戻るボタン（左矢印アイコン）→ メイン画面に戻る */}
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => router.back()}
@@ -82,152 +54,128 @@ export default function SettingsScreen() {
         >
           <Ionicons name="arrow-back" size={22} color={Colors.text} />
         </TouchableOpacity>
-
-        {/* 画面タイトル */}
         <Text style={styles.headerTitle}>設定</Text>
-
-        {/* 右側のスペース調整用（中央揃えのため） */}
         <View style={{ width: 40 }} />
       </View>
 
-      {/* ===== スクロール可能な設定リスト ===== */}
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: botPad + 20 }]}
         showsVerticalScrollIndicator={false}
       >
 
-        {/* ===== セクション1：認識言語の選択 ===== */}
+        {/* ===== クイックアクション（よく使う機能へのショートカット）===== */}
+        <Text style={styles.sectionLabel}>機能</Text>
+        <View style={styles.card}>
+
+          {/* 字幕の履歴を見る */}
+          <Pressable
+            style={({ pressed }) => [styles.navRow, pressed && styles.rowPressed]}
+            onPress={() => router.push("/history")}
+          >
+            <View style={[styles.navIcon, { backgroundColor: "rgba(78, 205, 196, 0.15)" }]}>
+              <Ionicons name="time-outline" size={20} color={Colors.accent} />
+            </View>
+            <View style={styles.navTextGroup}>
+              <Text style={styles.navLabel}>字幕の履歴</Text>
+              <Text style={styles.navDesc}>過去のセッションを振り返る（{sessions.length}件）</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+          </Pressable>
+
+          <View style={styles.divider} />
+
+          {/* 視認性の設定（弱視の方向け） */}
+          <Pressable
+            style={({ pressed }) => [styles.navRow, pressed && styles.rowPressed]}
+            onPress={() => router.push("/accessibility")}
+          >
+            <View style={[styles.navIcon, { backgroundColor: "rgba(69, 183, 209, 0.15)" }]}>
+              <Ionicons name="eye-outline" size={20} color={Colors.accentSecondary} />
+            </View>
+            <View style={styles.navTextGroup}>
+              <Text style={styles.navLabel}>視認性の設定</Text>
+              <Text style={styles.navDesc}>文字サイズ・色・コントラストを調整</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+          </Pressable>
+        </View>
+
+        {/* ===== 認識言語の選択 ===== */}
         <Text style={styles.sectionLabel}>認識言語</Text>
         <View style={styles.card}>
           {LANGUAGES.map((lang, idx) => (
             <React.Fragment key={lang.code}>
-              {/* 各言語の選択行 */}
               <Pressable
-                style={({ pressed }) => [
-                  styles.langRow,
-                  pressed && styles.rowPressed, // タップ時に背景を明るくする
-                ]}
-                onPress={() => setSelectedLang(lang.code)}
+                style={({ pressed }) => [styles.langRow, pressed && styles.rowPressed]}
+                onPress={() => updateSettings({ language: lang.code })}
               >
                 <View>
                   <Text style={styles.langLabel}>{lang.label}</Text>
                   <Text style={styles.langNative}>{lang.native}</Text>
                 </View>
-                {/* 選択中の言語にチェックマークを表示 */}
-                {selectedLang === lang.code ? (
+                {settings.language === lang.code ? (
                   <Ionicons name="checkmark-circle" size={22} color={Colors.accent} />
                 ) : (
                   <Ionicons name="ellipse-outline" size={22} color={Colors.textMuted} />
                 )}
               </Pressable>
-              {/* 区切り線（最後の項目には表示しない） */}
               {idx < LANGUAGES.length - 1 && <View style={styles.divider} />}
             </React.Fragment>
           ))}
         </View>
 
-        {/* ===== セクション2：字幕の文字サイズ選択 ===== */}
-        <Text style={styles.sectionLabel}>字幕の文字サイズ</Text>
-        <View style={styles.card}>
-          <View style={styles.fontSizeRow}>
-            {/* 各文字サイズのボタン */}
-            {FONT_SIZES.map((f) => (
-              <Pressable
-                key={f.key}
-                style={[
-                  styles.fontSizeBtn,
-                  fontSize === f.key && styles.fontSizeBtnActive, // 選択中は強調表示
-                ]}
-                onPress={() => setFontSize(f.key)}
-              >
-                {/* サイズラベル（小・中・大・特大） */}
-                <Text
-                  style={[
-                    styles.fontSizeBtnText,
-                    { fontSize: f.size > 28 ? 18 : f.size > 20 ? 16 : 14 },
-                    fontSize === f.key && styles.fontSizeBtnTextActive,
-                  ]}
-                >
-                  {f.label}
-                </Text>
-                {/* サンプル文字「あ」でサイズ感を表示 */}
-                <Text
-                  style={[
-                    styles.fontSizePreview,
-                    { fontSize: Math.min(f.size, 20) },
-                    fontSize === f.key && styles.fontSizeBtnTextActive,
-                  ]}
-                >
-                  あ
-                </Text>
-              </Pressable>
-            ))}
+        {/* ===== プライバシーについての説明 ===== */}
+        <Text style={styles.sectionLabel}>プライバシーについて</Text>
+        <View style={styles.privacyCard}>
+          <View style={styles.privacyRow}>
+            <Ionicons name="shield-checkmark-outline" size={20} color={Colors.success} />
+            <View style={styles.privacyText}>
+              <Text style={styles.privacyTitle}>ローカルファースト設計</Text>
+              <Text style={styles.privacyDesc}>
+                字幕の履歴はすべてこのスマホ内にのみ保存されます。
+                サーバーには送信されません。
+              </Text>
+            </View>
+          </View>
+          <View style={styles.privacyDivider} />
+          <View style={styles.privacyRow}>
+            <MaterialCommunityIcons name="microphone-outline" size={20} color={Colors.accentSecondary} />
+            <View style={styles.privacyText}>
+              <Text style={styles.privacyTitle}>音声認識について</Text>
+              <Text style={styles.privacyDesc}>
+                音声認識にはデバイスのプラットフォーム機能（iOS/Androidの音声認識）を使用します。
+                認識データはApple・Googleのサービスを経由します。
+              </Text>
+            </View>
+          </View>
+          <View style={styles.privacyDivider} />
+          <View style={styles.privacyRow}>
+            <Feather name="wifi-off" size={20} color={Colors.textSecondary} />
+            <View style={styles.privacyText}>
+              <Text style={styles.privacyTitle}>オフライン利用について</Text>
+              <Text style={styles.privacyDesc}>
+                字幕履歴の閲覧・コピーはオフラインでも利用できます。
+                音声認識にはインターネット接続が必要です。
+              </Text>
+            </View>
           </View>
         </View>
 
-        {/* ===== セクション3：動作設定 ===== */}
-        <Text style={styles.sectionLabel}>動作設定</Text>
-        <View style={styles.card}>
-
-          {/* 継続認識モードのオン/オフ切り替え */}
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleInfo}>
-              <MaterialCommunityIcons
-                name="microphone-outline"
-                size={20}
-                color={Colors.accent}
-              />
-              <View style={{ marginLeft: 12 }}>
-                <Text style={styles.toggleLabel}>継続認識モード</Text>
-                <Text style={styles.toggleDesc}>停止するまで自動で認識し続ける</Text>
-              </View>
-            </View>
-            <Switch
-              value={continuousMode}
-              onValueChange={setContinuousMode}
-              trackColor={{ false: Colors.border, true: Colors.accent }}
-              thumbColor="#fff"
-            />
-          </View>
-
-          <View style={styles.divider} />
-
-          {/* タイムスタンプ表示のオン/オフ切り替え */}
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleInfo}>
-              <Feather name="clock" size={20} color={Colors.accentSecondary} />
-              <View style={{ marginLeft: 12 }}>
-                <Text style={styles.toggleLabel}>タイムスタンプ表示</Text>
-                <Text style={styles.toggleDesc}>各字幕に時刻を表示する</Text>
-              </View>
-            </View>
-            <Switch
-              value={showTimestamp}
-              onValueChange={setShowTimestamp}
-              trackColor={{ false: Colors.border, true: Colors.accentSecondary }}
-              thumbColor="#fff"
-            />
-          </View>
-        </View>
-
-        {/* ===== セクション4：アプリ情報 ===== */}
+        {/* ===== アプリ情報 ===== */}
         <Text style={styles.sectionLabel}>アプリについて</Text>
         <View style={styles.card}>
-          {/* アプリ名の表示 */}
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>アプリ名</Text>
-            <Text style={styles.infoValue}>CaptionBridge (キャプションブリッジ)</Text>
+            <Text style={styles.infoValue}>CaptionBridge</Text>
           </View>
           <View style={styles.divider} />
-          {/* バージョン番号 */}
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>バージョン</Text>
             <Text style={styles.infoValue}>1.0.0</Text>
           </View>
           <View style={styles.divider} />
-          {/* アプリの目的 */}
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>目的</Text>
+            <Text style={styles.infoLabel}>対象</Text>
             <Text style={styles.infoValue}>高齢者・障害者向けアクセシビリティ</Text>
           </View>
         </View>
@@ -241,13 +189,10 @@ export default function SettingsScreen() {
 // スタイル定義
 // ============================================================
 const styles = StyleSheet.create({
-  // 画面全体のコンテナ
   container: {
     flex: 1,
     backgroundColor: Colors.background,
   },
-
-  // ヘッダーエリア（戻るボタン・タイトル）
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -270,14 +215,10 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     color: Colors.text,
   },
-
-  // スクロールエリアの内側余白
   scroll: {
     padding: 20,
     gap: 8,
   },
-
-  // セクションラベル（「認識言語」「字幕の文字サイズ」など）
   sectionLabel: {
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
@@ -288,8 +229,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginLeft: 4,
   },
-
-  // 設定項目のカード（角丸の枠）
   card: {
     backgroundColor: Colors.surface,
     borderRadius: 16,
@@ -298,16 +237,46 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
-  // 言語選択の各行
+  // ナビゲーション行（履歴・視認性など）
+  navRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 12,
+  },
+  rowPressed: {
+    backgroundColor: Colors.surfaceHigh,
+  },
+  navIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navTextGroup: {
+    flex: 1,
+  },
+  navLabel: {
+    fontSize: 16,
+    fontFamily: "Inter_400Regular",
+    color: Colors.text,
+  },
+  navDesc: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+
+  // 言語選択
   langRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 14,
-  },
-  rowPressed: {
-    backgroundColor: Colors.surfaceHigh, // タップ時の背景色
   },
   langLabel: {
     fontSize: 16,
@@ -320,71 +289,47 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 2,
   },
-
-  // 項目間の区切り線
   divider: {
     height: 1,
     backgroundColor: Colors.border,
     marginHorizontal: 16,
   },
 
-  // 文字サイズ選択ボタンの横並びエリア
-  fontSizeRow: {
-    flexDirection: "row",
-    padding: 12,
-    gap: 8,
+  // プライバシーカード
+  privacyCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 16,
+    gap: 12,
   },
-
-  // 各文字サイズボタン
-  fontSizeBtn: {
+  privacyRow: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  privacyText: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: Colors.surfaceHigh,
-    alignItems: "center",
     gap: 4,
   },
-  fontSizeBtnActive: {
-    backgroundColor: Colors.accent, // 選択中はティール色
-  },
-  fontSizeBtnText: {
+  privacyTitle: {
+    fontSize: 14,
     fontFamily: "Inter_600SemiBold",
     color: Colors.textSecondary,
   },
-  fontSizeBtnTextActive: {
-    color: Colors.background, // 選択中は文字色を反転
-  },
-  fontSizePreview: {
-    fontFamily: "Inter_400Regular",
-    color: Colors.textMuted,
-  },
-
-  // トグルスイッチの行（動作設定）
-  toggleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  toggleInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  toggleLabel: {
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-    color: Colors.text,
-  },
-  toggleDesc: {
+  privacyDesc: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     color: Colors.textMuted,
-    marginTop: 2,
+    lineHeight: 18,
+  },
+  privacyDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
   },
 
-  // アプリ情報の各行
+  // アプリ情報
   infoRow: {
     flexDirection: "row",
     alignItems: "center",

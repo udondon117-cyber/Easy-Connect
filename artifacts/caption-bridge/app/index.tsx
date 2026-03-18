@@ -1,7 +1,8 @@
 // ============================================================
 // index.tsx
 // 役割：アプリのメイン画面（字幕表示画面）
-//       音声を認識してリアルタイムで字幕を表示する
+//       音声をリアルタイムで認識して字幕を表示する
+//       ミニオーバーレイモードで字幕を小窓に縮小して動かせる
 // ============================================================
 
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -10,9 +11,12 @@ import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Animated,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -30,45 +34,35 @@ import Reanimated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/colors";
-import {
-  SpeechRecognizer,
-  SpeechRecognizerRef,
-} from "@/components/SpeechRecognizer";
-
-// ============================================================
-// 字幕データの型定義
-// ============================================================
-type CaptionEntry = {
-  id: string;        // 一意のID（重複を避けるため）
-  text: string;      // 認識されたテキスト
-  timestamp: Date;   // 認識された時刻
-};
+import { SpeechRecognizer, SpeechRecognizerRef } from "@/components/SpeechRecognizer";
+import { CaptionEntry, useCaptionContext } from "@/contexts/CaptionContext";
 
 // ============================================================
 // メイン画面コンポーネント
 // ============================================================
 export default function MainScreen() {
-  // 端末の安全な表示エリアの余白を取得（ノッチ・ホームバー対応）
   const insets = useSafeAreaInsets();
 
+  // コンテキストから設定・字幕保存関数を取得する
+  const { settings, getFontSize, saveSession } = useCaptionContext();
+
   // ========== 状態管理 ==========
-  const [isListening, setIsListening] = useState(false);    // 録音中かどうか
-  const [interimText, setInterimText] = useState("");        // 認識途中のテキスト
-  const [captions, setCaptions] = useState<CaptionEntry[]>([]); // 確定した字幕の履歴
-  const [statusMessage, setStatusMessage] = useState("マイクボタンを押して開始"); // 画面下部のステータス
-  const [copied, setCopied] = useState(false);               // コピー完了フラグ
-  const [error, setError] = useState<string | null>(null);   // エラーメッセージ
+  const [isListening, setIsListening] = useState(false);
+  const [interimText, setInterimText] = useState("");
+  const [captions, setCaptions] = useState<CaptionEntry[]>([]);
+  const [statusMessage, setStatusMessage] = useState("マイクボタンを押して開始");
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isMiniMode, setIsMiniMode] = useState(false); // ミニオーバーレイモードのフラグ
 
-  // ========== 参照（Ref）==========
-  const scrollRef = useRef<ScrollView>(null);       // 字幕エリアのスクロール制御用
-  const speechRef = useRef<SpeechRecognizerRef>(null); // 音声認識コンポーネントの操作用
+  // ========== 参照 ==========
+  const scrollRef = useRef<ScrollView>(null);
+  const speechRef = useRef<SpeechRecognizerRef>(null);
 
-  // ========== アニメーション値 ==========
-  const pulseAnim = useSharedValue(1);   // マイクボタンのパルス（拡大縮小）
-  const glowAnim = useSharedValue(0);    // マイクボタンのグロー（光の強さ）
-  const btnScale = useSharedValue(1);   // ボタンタップ時の拡大縮小
-
-  // 音声波形バーのアニメーション値（5本分）
+  // ========== アニメーション値（react-native-reanimated） ==========
+  const pulseAnim = useSharedValue(1);
+  const glowAnim = useSharedValue(0);
+  const btnScale = useSharedValue(1);
   const waveAnims = [
     useSharedValue(0.3),
     useSharedValue(0.5),
@@ -77,39 +71,59 @@ export default function MainScreen() {
     useSharedValue(0.6),
   ];
 
-  // ========== アニメーション制御 ==========
-  // 録音状態に応じてアニメーションを開始・停止する
+  // ミニオーバーレイのドラッグ位置（react-nativeのAnimated.ValueXY）
+  const panPosition = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+
+  // ========== ミニオーバーレイのドラッグ操作（PanResponder）==========
+  const panResponder = useRef(
+    PanResponder.create({
+      // タッチが動いたときに反応する
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        Math.abs(gestureState.dx) > 3 || Math.abs(gestureState.dy) > 3,
+      // ドラッグ開始時：現在位置をオフセットとして設定する
+      onPanResponderGrant: () => {
+        panPosition.setOffset({
+          x: (panPosition.x as any)._value,
+          y: (panPosition.y as any)._value,
+        });
+      },
+      // ドラッグ中：位置を更新する
+      onPanResponderMove: Animated.event(
+        [null, { dx: panPosition.x, dy: panPosition.y }],
+        { useNativeDriver: false }
+      ),
+      // ドラッグ終了：オフセットを平坦化して位置を確定する
+      onPanResponderRelease: () => {
+        panPosition.flattenOffset();
+      },
+    })
+  ).current;
+
+  // ========== 録音状態に応じてアニメーションを制御 ==========
   useEffect(() => {
     if (isListening) {
-      // 録音中：パルスアニメーションを繰り返す
+      // 録音中：パルス・グロー・波形アニメーションを繰り返す
       pulseAnim.value = withRepeat(
         withSequence(
           withTiming(1.08, { duration: 700, easing: Easing.inOut(Easing.ease) }),
           withTiming(1.0, { duration: 700, easing: Easing.inOut(Easing.ease) })
         ),
-        -1, // -1 = 無限に繰り返す
-        true
+        -1, true
       );
-
-      // 録音中：グローアニメーションを繰り返す
       glowAnim.value = withRepeat(
         withSequence(
           withTiming(1, { duration: 800 }),
           withTiming(0.4, { duration: 800 })
         ),
-        -1,
-        true
+        -1, true
       );
-
-      // 録音中：音声波形バーのアニメーションを繰り返す
       waveAnims.forEach((anim, i) => {
         anim.value = withRepeat(
           withSequence(
             withTiming(1, { duration: 300 + i * 80, easing: Easing.inOut(Easing.ease) }),
             withTiming(0.15, { duration: 300 + i * 80, easing: Easing.inOut(Easing.ease) })
           ),
-          -1,
-          true
+          -1, true
         );
       });
     } else {
@@ -122,53 +136,32 @@ export default function MainScreen() {
     }
   }, [isListening]);
 
-  // ========== アニメーションスタイル ==========
-  // パルスアニメーション（拡大縮小）
-  const pulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulseAnim.value }],
-  }));
-
-  // グローアニメーション（透明度）
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: glowAnim.value,
-  }));
-
-  // ボタンタップ時の縮小アニメーション
-  const btnStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: btnScale.value }],
-  }));
-
-  // 音声波形バーのアニメーション（縦方向の拡大縮小）
+  // アニメーションスタイル
+  const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulseAnim.value }] }));
+  const glowStyle = useAnimatedStyle(() => ({ opacity: glowAnim.value }));
+  const btnStyle = useAnimatedStyle(() => ({ transform: [{ scale: btnScale.value }] }));
   const waveStyles = waveAnims.map((anim) =>
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    useAnimatedStyle(() => ({
-      scaleY: anim.value,
-    }))
+    useAnimatedStyle(() => ({ scaleY: anim.value }))
   );
 
   // ========== イベントハンドラー ==========
 
-  // マイクボタンをタップした時の処理（録音開始/停止の切り替え）
+  // マイクボタン：録音開始/停止の切り替え
   const handleToggle = useCallback(async () => {
-    // ボタンタップのアニメーション
     btnScale.value = withSequence(
       withSpring(0.92, { damping: 10, stiffness: 400 }),
       withSpring(1, { damping: 10, stiffness: 400 })
     );
-
-    // スマホに触覚フィードバック（バイブレーション）を送る
     if (Platform.OS !== "web") {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-
     if (isListening) {
-      // 録音中の場合：停止する
       speechRef.current?.stopListening();
       setIsListening(false);
       setInterimText("");
       setStatusMessage("マイクボタンを押して開始");
     } else {
-      // 停止中の場合：開始する
       setError(null);
       setInterimText("");
       setStatusMessage("認識中...");
@@ -176,40 +169,46 @@ export default function MainScreen() {
     }
   }, [isListening]);
 
-  // 音声認識が開始された時の処理
+  // 音声認識開始時の処理
   const handleSpeechStart = useCallback(() => {
     setIsListening(true);
     setStatusMessage("聞いています...");
     setError(null);
   }, []);
 
-  // 音声認識が終了した時の処理
+  // 音声認識終了時の処理（セッションを自動保存する）
   const handleSpeechEnd = useCallback(() => {
     setIsListening(false);
     setInterimText("");
     setStatusMessage("マイクボタンを押して開始");
-  }, []);
+    // 認識結果がある場合のみ履歴に保存する（captions参照が古いためfunctional update使用）
+    setCaptions((current) => {
+      if (current.length > 0) {
+        saveSession(current);
+      }
+      return current;
+    });
+  }, [saveSession]);
 
-  // 音声認識の結果を受け取った時の処理
+  // 音声認識の結果を受け取る
   const handleResult = useCallback((text: string, isFinal: boolean) => {
     if (isFinal) {
-      // 確定した字幕を履歴に追加する
+      // 確定した字幕を追加する
       const entry: CaptionEntry = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
         text: text.trim(),
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       };
       setCaptions((prev) => [...prev, entry]);
       setInterimText("");
-      // 新しい字幕が追加されたら自動スクロールする
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     } else {
-      // 認識途中のテキストを表示する（確定ではない）
+      // 認識中のテキスト（まだ確定していない）
       setInterimText(text);
     }
   }, []);
 
-  // エラーが発生した時の処理（エラーの種類に応じて日本語メッセージを表示）
+  // エラーを受け取ってわかりやすい日本語メッセージに変換する
   const handleError = useCallback((err: string) => {
     setIsListening(false);
     setInterimText("");
@@ -220,7 +219,6 @@ export default function MainScreen() {
     } else if (err === "network") {
       setError("インターネット接続を確認してください");
     } else if (err === "no-speech") {
-      // 音声なし（無音）の場合はエラーではなくステータスをリセットするだけ
       setStatusMessage("マイクボタンを押して開始");
       return;
     } else {
@@ -229,22 +227,31 @@ export default function MainScreen() {
     setStatusMessage("マイクボタンを押して開始");
   }, []);
 
-  // コピーボタンをタップした時の処理
+  // コピーボタン：すべての字幕をクリップボードにコピーする
   const handleCopy = useCallback(async () => {
-    // すべての字幕テキストを改行でつなげてコピーする
     const allText = captions.map((c) => c.text).join("\n");
     if (!allText) return;
     await Clipboard.setStringAsync(allText);
-    // 成功の触覚フィードバック
     if (Platform.OS !== "web") {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    // コピー完了を2秒間表示する
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [captions]);
 
-  // クリアボタンをタップした時の処理（字幕をすべて消す）
+  // シェアボタン：字幕テキストを他のアプリで共有する
+  const handleShare = useCallback(async () => {
+    const allText = captions.map((c) => c.text).join("\n");
+    if (!allText) return;
+    try {
+      await Share.share({
+        message: allText,
+        title: "CaptionBridgeの字幕",
+      });
+    } catch {}
+  }, [captions]);
+
+  // クリアボタン：字幕をすべて消す
   const handleClear = useCallback(async () => {
     if (Platform.OS !== "web") {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -253,50 +260,170 @@ export default function MainScreen() {
     setInterimText("");
   }, []);
 
-  // ========== 画面表示の計算 ==========
-  // Webの場合は固定余白、スマホの場合は端末の安全エリアを使用
+  // ミニモードの切り替え（字幕を小窓に縮小する）
+  const handleToggleMiniMode = useCallback(async () => {
+    if (Platform.OS !== "web") {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (!isMiniMode) {
+      // ミニモードに入る時：画面中央下部にリセット
+      panPosition.setValue({ x: 0, y: 0 });
+    }
+    setIsMiniMode((prev) => !prev);
+  }, [isMiniMode]);
+
+  // ========== 計算値 ==========
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
-
-  // 字幕エリアに表示する内容があるか確認
   const hasContent = captions.length > 0 || interimText.length > 0;
 
-  // ========== 画面のレンダリング ==========
+  // 視認性設定からスタイルを構築する
+  const captionFontSize = getFontSize();
+  const captionFontFamily = settings.fontBold ? "Inter_700Bold" : "Inter_400Regular";
+  const captionBgColor = settings.highContrast
+    ? `rgba(0, 0, 0, ${settings.bgOpacity})`
+    : `rgba(14, 14, 22, ${settings.bgOpacity})`;
+
+  // 最新の字幕テキスト（ミニモード用）
+  const latestCaption = captions.length > 0
+    ? captions[captions.length - 1].text
+    : interimText || "音声を待っています...";
+
+  // ============================================================
+  // ミニオーバーレイモードの描画
+  // ============================================================
+  if (isMiniMode) {
+    return (
+      <View style={styles.miniContainer}>
+        {/* バックグラウンドで音声認識は継続する */}
+        <SpeechRecognizer
+          ref={speechRef}
+          language={settings.language}
+          onResult={handleResult}
+          onStart={handleSpeechStart}
+          onEnd={handleSpeechEnd}
+          onError={handleError}
+        />
+
+        {/* ドラッグ可能な字幕ウィンドウ */}
+        <Animated.View
+          style={[
+            styles.miniOverlay,
+            { backgroundColor: captionBgColor },
+            {
+              transform: [
+                { translateX: panPosition.x },
+                { translateY: panPosition.y },
+              ],
+            },
+          ]}
+          {...panResponder.panHandlers}
+        >
+          {/* ドラッグハンドル（上部の小さなバー）*/}
+          <View style={styles.miniDragHandle} />
+
+          {/* 字幕テキスト */}
+          <Text
+            style={[
+              styles.miniCaptionText,
+              {
+                fontSize: Math.min(captionFontSize, 20),
+                color: settings.textColor,
+                fontFamily: captionFontFamily,
+              },
+            ]}
+            numberOfLines={3}
+          >
+            {latestCaption}
+          </Text>
+
+          {/* ミニモードのコントロールバー */}
+          <View style={styles.miniControls}>
+            {/* 録音ボタン */}
+            <TouchableOpacity
+              style={[
+                styles.miniBtn,
+                isListening && styles.miniBtnActive,
+              ]}
+              onPress={handleToggle}
+            >
+              <MaterialCommunityIcons
+                name={isListening ? "stop" : "microphone"}
+                size={16}
+                color={isListening ? Colors.recordingRed : Colors.accent}
+              />
+            </TouchableOpacity>
+
+            {/* 認識中インジケーター */}
+            {isListening && (
+              <View style={styles.miniIndicator}>
+                <View style={styles.miniDot} />
+                <Text style={styles.miniStatus}>認識中</Text>
+              </View>
+            )}
+
+            {/* 展開ボタン（フル画面に戻る） */}
+            <TouchableOpacity
+              style={styles.miniBtn}
+              onPress={handleToggleMiniMode}
+            >
+              <Ionicons name="expand" size={16} color={Colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </View>
+    );
+  }
+
+  // ============================================================
+  // 通常モードの描画
+  // ============================================================
   return (
     <View style={[styles.container, { paddingTop: topPad, paddingBottom: botPad }]}>
 
-      {/* バックグラウンドで動く音声認識コンポーネント（画面には表示されない） */}
+      {/* バックグラウンドで動く音声認識コンポーネント */}
       <SpeechRecognizer
         ref={speechRef}
-        language="ja-JP"
+        language={settings.language}
         onResult={handleResult}
         onStart={handleSpeechStart}
         onEnd={handleSpeechEnd}
         onError={handleError}
       />
 
-      {/* ===== ヘッダーエリア ===== */}
+      {/* ===== ヘッダー ===== */}
       <View style={styles.header}>
         <View>
-          {/* アプリ名（英語） */}
           <Text style={styles.appTitle}>CaptionBridge</Text>
-          {/* アプリ名（日本語） */}
           <Text style={styles.appSubtitle}>キャプションブリッジ</Text>
         </View>
-        {/* 設定ボタン（右上の歯車アイコン）→ 設定画面へ移動 */}
-        <TouchableOpacity
-          style={styles.settingsBtn}
-          onPress={() => router.push("/settings")}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Feather name="settings" size={22} color={Colors.textSecondary} />
-        </TouchableOpacity>
+
+        {/* ヘッダー右側のボタン群 */}
+        <View style={styles.headerRight}>
+          {/* 履歴ボタン */}
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => router.push("/history")}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="time-outline" size={20} color={Colors.textSecondary} />
+          </TouchableOpacity>
+
+          {/* 設定ボタン */}
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => router.push("/settings")}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Feather name="settings" size={20} color={Colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ===== 字幕表示エリア ===== */}
-      <View style={styles.captionArea}>
+      <View style={[styles.captionArea, { backgroundColor: captionBgColor }]}>
         {!hasContent ? (
-          // 字幕がない時の空の状態表示
+          // 字幕がない時の案内表示
           <View style={styles.emptyState}>
             <MaterialCommunityIcons
               name="microphone-outline"
@@ -307,32 +434,54 @@ export default function MainScreen() {
             <Text style={styles.emptyText}>ここに字幕が表示されます</Text>
           </View>
         ) : (
-          // 字幕がある時はスクロール可能なリストで表示
           <ScrollView
             ref={scrollRef}
             contentContainerStyle={styles.captionScroll}
             showsVerticalScrollIndicator={false}
           >
-            {/* 確定した字幕を順番に表示 */}
+            {/* 確定した字幕の一覧 */}
             {captions.map((entry) => (
               <View key={entry.id} style={styles.captionBubble}>
-                {/* 字幕テキスト */}
-                <Text style={styles.captionText}>{entry.text}</Text>
-                {/* 認識時刻 */}
-                <Text style={styles.captionTime}>
-                  {entry.timestamp.toLocaleTimeString("ja-JP", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })}
+                <Text
+                  style={[
+                    styles.captionText,
+                    {
+                      fontSize: captionFontSize,
+                      color: settings.textColor,
+                      fontFamily: captionFontFamily,
+                    },
+                  ]}
+                >
+                  {entry.text}
                 </Text>
+                {/* タイムスタンプ（設定でオン/オフ可能）*/}
+                {settings.showTimestamp && (
+                  <Text style={styles.captionTime}>
+                    {new Date(entry.timestamp).toLocaleTimeString("ja-JP", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </Text>
+                )}
               </View>
             ))}
 
-            {/* 認識途中のテキスト（まだ確定していない、薄い色で表示） */}
+            {/* 認識途中のテキスト（薄い色で表示） */}
             {interimText ? (
               <View style={[styles.captionBubble, styles.interimBubble]}>
-                <Text style={[styles.captionText, styles.interimText]}>
+                <Text
+                  style={[
+                    styles.captionText,
+                    styles.interimText,
+                    {
+                      fontSize: captionFontSize,
+                      color: settings.textColor,
+                      fontFamily: captionFontFamily,
+                      opacity: 0.6,
+                    },
+                  ]}
+                >
                   {interimText}
                 </Text>
               </View>
@@ -341,7 +490,7 @@ export default function MainScreen() {
         )}
       </View>
 
-      {/* ===== エラーメッセージバー ===== */}
+      {/* ===== エラーメッセージ ===== */}
       {error ? (
         <View style={styles.errorBar}>
           <Ionicons name="warning-outline" size={16} color={Colors.recordingRed} />
@@ -349,88 +498,80 @@ export default function MainScreen() {
         </View>
       ) : null}
 
-      {/* ===== コントロールバー（操作ボタン群） ===== */}
+      {/* ===== コントロールバー ===== */}
       <View style={styles.controls}>
 
-        {/* クリアボタン（左側：字幕を全部消す） */}
+        {/* 左側：クリアボタン */}
         <TouchableOpacity
           style={[styles.sideBtn, !hasContent && styles.sideBtnDisabled]}
           onPress={handleClear}
-          disabled={!hasContent} // 字幕がない時はボタンを無効化
+          disabled={!hasContent}
         >
           <Feather
             name="trash-2"
-            size={22}
+            size={20}
             color={hasContent ? Colors.textSecondary : Colors.textMuted}
           />
         </TouchableOpacity>
 
-        {/* マイクボタン（中央：録音開始/停止） */}
+        {/* 中央：マイクボタン */}
         <View style={styles.micWrapper}>
-
-          {/* グロー効果（ボタンの光の輪） */}
-          <Reanimated.View
-            style={[
-              styles.micGlow,
-              isListening ? styles.micGlowActive : styles.micGlowIdle,
-              glowStyle,
-            ]}
-          />
-
-          {/* パルスリング（外側の点滅する輪） */}
-          <Reanimated.View
-            style={[
-              styles.micPulse,
-              isListening ? styles.micPulseActive : styles.micPulseIdle,
-              pulseStyle,
-            ]}
-          />
-
-          {/* ボタン本体 */}
+          <Reanimated.View style={[styles.micGlow, isListening ? styles.micGlowActive : styles.micGlowIdle, glowStyle]} />
+          <Reanimated.View style={[styles.micPulse, isListening ? styles.micPulseActive : styles.micPulseIdle, pulseStyle]} />
           <Reanimated.View style={btnStyle}>
             <Pressable
-              style={[
-                styles.micBtn,
-                isListening ? styles.micBtnActive : styles.micBtnIdle,
-              ]}
+              style={[styles.micBtn, isListening ? styles.micBtnActive : styles.micBtnIdle]}
               onPress={handleToggle}
             >
               {isListening ? (
-                // 録音中：音声波形アニメーションを表示
                 <View style={styles.waveContainer}>
                   {waveStyles.map((ws, i) => (
                     <Reanimated.View key={i} style={[styles.waveBar, ws]} />
                   ))}
                 </View>
               ) : (
-                // 停止中：マイクアイコンを表示
                 <MaterialCommunityIcons name="microphone" size={34} color="#fff" />
               )}
             </Pressable>
           </Reanimated.View>
         </View>
 
-        {/* コピーボタン（右側：字幕テキストをコピー） */}
-        <TouchableOpacity
-          style={[styles.sideBtn, !hasContent && styles.sideBtnDisabled]}
-          onPress={handleCopy}
-          disabled={!hasContent} // 字幕がない時はボタンを無効化
-        >
-          <Ionicons
-            name={copied ? "checkmark-circle" : "copy-outline"}
-            size={22}
-            color={
-              copied
-                ? Colors.success          // コピー完了時は緑色
-                : hasContent
-                  ? Colors.textSecondary  // 字幕あり時は白色
-                  : Colors.textMuted      // 字幕なし時は薄い色
-            }
-          />
-        </TouchableOpacity>
+        {/* 右側：コピー・シェア・ミニモードのボタングループ */}
+        <View style={styles.rightButtons}>
+          {/* コピーボタン */}
+          <TouchableOpacity
+            style={[styles.smallBtn, !hasContent && styles.sideBtnDisabled]}
+            onPress={handleCopy}
+            disabled={!hasContent}
+          >
+            <Ionicons
+              name={copied ? "checkmark-circle" : "copy-outline"}
+              size={18}
+              color={copied ? Colors.success : hasContent ? Colors.textSecondary : Colors.textMuted}
+            />
+          </TouchableOpacity>
+
+          {/* シェアボタン */}
+          <TouchableOpacity
+            style={[styles.smallBtn, !hasContent && styles.sideBtnDisabled]}
+            onPress={handleShare}
+            disabled={!hasContent}
+          >
+            <Ionicons
+              name="share-outline"
+              size={18}
+              color={hasContent ? Colors.textSecondary : Colors.textMuted}
+            />
+          </TouchableOpacity>
+
+          {/* ミニモードボタン（字幕を小窓に縮小する） */}
+          <TouchableOpacity style={styles.smallBtn} onPress={handleToggleMiniMode}>
+            <Ionicons name="contract-outline" size={18} color={Colors.accent} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* ===== ステータステキスト（現在の状態を表示） ===== */}
+      {/* ===== ステータステキスト ===== */}
       <Text style={styles.statusText}>{statusMessage}</Text>
     </View>
   );
@@ -440,20 +581,18 @@ export default function MainScreen() {
 // スタイル定義
 // ============================================================
 const styles = StyleSheet.create({
-  // 画面全体のコンテナ
+  // ===== 通常モード =====
   container: {
     flex: 1,
     backgroundColor: Colors.background,
     paddingHorizontal: 20,
   },
-
-  // ヘッダー部分（タイトルと設定ボタン）
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingTop: 12,
-    paddingBottom: 16,
+    paddingBottom: 14,
   },
   appTitle: {
     fontSize: 24,
@@ -467,27 +606,28 @@ const styles = StyleSheet.create({
     color: Colors.accent,
     marginTop: 2,
   },
-  settingsBtn: {
-    width: 40,
-    height: 40,
+  headerRight: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  headerBtn: {
+    width: 38,
+    height: 38,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
     backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-
-  // 字幕表示エリア（画面の大部分を占める）
   captionArea: {
     flex: 1,
-    backgroundColor: Colors.surface,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: Colors.border,
     overflow: "hidden",
-    marginBottom: 16,
+    marginBottom: 14,
   },
-
-  // 字幕がない時の空の状態
   emptyState: {
     flex: 1,
     alignItems: "center",
@@ -502,49 +642,32 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 24,
   },
-
-  // 字幕スクロールエリア
   captionScroll: {
     padding: 16,
     gap: 12,
   },
-
-  // 各字幕のバブル（吹き出し風）
   captionBubble: {
-    backgroundColor: Colors.surfaceHigh,
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
     borderRadius: 14,
     padding: 14,
     gap: 6,
   },
-
-  // 認識途中の字幕バブル（ティール色の枠線付き）
   interimBubble: {
     borderColor: Colors.accent,
     borderWidth: 1,
-    backgroundColor: "rgba(78, 205, 196, 0.08)",
+    backgroundColor: "rgba(78, 205, 196, 0.06)",
   },
-
-  // 字幕テキスト（大きめフォントで読みやすく）
   captionText: {
-    fontSize: 22,
-    fontFamily: "Inter_400Regular",
-    color: Colors.text,
-    lineHeight: 32,
+    lineHeight: 34,
   },
-
-  // 認識途中テキスト（少し薄い色）
   interimText: {
-    color: Colors.textSecondary,
+    // 認識途中はopacityで薄くする（本体スタイルで設定）
   },
-
-  // 時刻表示テキスト
   captionTime: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     color: Colors.textMuted,
   },
-
-  // エラーメッセージバー
   errorBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -563,17 +686,13 @@ const styles = StyleSheet.create({
     color: Colors.recordingRed,
     flex: 1,
   },
-
-  // コントロールバー（操作ボタンが並ぶ行）
   controls: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
+    paddingHorizontal: 4,
     marginBottom: 8,
   },
-
-  // 左右のサイドボタン（クリア・コピー）
   sideBtn: {
     width: 52,
     height: 52,
@@ -585,18 +704,29 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   sideBtnDisabled: {
-    opacity: 0.4, // 無効状態は薄く表示
+    opacity: 0.4,
   },
-
-  // マイクボタンの外側ラッパー（グロー・パルスを重ねるため）
+  rightButtons: {
+    flexDirection: "column",
+    gap: 6,
+    alignItems: "center",
+  },
+  smallBtn: {
+    width: 38,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
   micWrapper: {
     width: 90,
     height: 90,
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // グロー効果（ボタンの背後に広がる光）
   micGlow: {
     position: "absolute",
     width: 90,
@@ -604,7 +734,6 @@ const styles = StyleSheet.create({
     borderRadius: 45,
   },
   micGlowActive: {
-    // 録音中：赤いグロー
     backgroundColor: Colors.recordingGlow,
     shadowColor: Colors.recordingRed,
     shadowOffset: { width: 0, height: 0 },
@@ -613,7 +742,6 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   micGlowIdle: {
-    // 停止中：ティールのグロー
     backgroundColor: Colors.accentGlow,
     shadowColor: Colors.accent,
     shadowOffset: { width: 0, height: 0 },
@@ -621,8 +749,6 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 8,
   },
-
-  // パルスリング（外側の輪）
   micPulse: {
     position: "absolute",
     width: 90,
@@ -631,14 +757,12 @@ const styles = StyleSheet.create({
   },
   micPulseActive: {
     borderWidth: 2,
-    borderColor: Colors.recordingRed, // 録音中：赤い輪
+    borderColor: Colors.recordingRed,
   },
   micPulseIdle: {
     borderWidth: 2,
-    borderColor: Colors.accent, // 停止中：ティールの輪
+    borderColor: Colors.accent,
   },
-
-  // マイクボタン本体
   micBtn: {
     width: 72,
     height: 72,
@@ -651,34 +775,95 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   micBtnIdle: {
-    backgroundColor: Colors.accent, // 停止中：ティール色
+    backgroundColor: Colors.accent,
   },
   micBtnActive: {
-    backgroundColor: Colors.recordingRed, // 録音中：赤色
+    backgroundColor: Colors.recordingRed,
   },
-
-  // 音声波形アニメーションのコンテナ
   waveContainer: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     height: 32,
   },
-
-  // 音声波形の各バー（5本）
   waveBar: {
     width: 4,
     height: 28,
     borderRadius: 3,
     backgroundColor: "#fff",
   },
-
-  // ステータステキスト（現在の状態説明）
   statusText: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     color: Colors.textMuted,
     textAlign: "center",
     paddingBottom: 8,
+  },
+
+  // ===== ミニオーバーレイモード =====
+  // 背景（他のコンテンツが見えるように透明）
+  miniContainer: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+  // ドラッグ可能な字幕ウィンドウ
+  miniOverlay: {
+    position: "absolute",
+    bottom: 120,
+    left: 20,
+    right: 20,
+    borderRadius: 18,
+    padding: 14,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "rgba(78, 205, 196, 0.4)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 16,
+  },
+  // ドラッグのためのハンドル（上部の小さなバー）
+  miniDragHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.3)",
+    alignSelf: "center",
+  },
+  miniCaptionText: {
+    lineHeight: 26,
+  },
+  miniControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  miniBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  miniBtnActive: {
+    backgroundColor: "rgba(255, 71, 87, 0.2)",
+  },
+  miniIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  miniDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.recordingRed,
+  },
+  miniStatus: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    color: Colors.textSecondary,
   },
 });
