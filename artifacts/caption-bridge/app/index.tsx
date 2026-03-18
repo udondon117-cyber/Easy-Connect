@@ -209,21 +209,38 @@ export default function MainScreen() {
   }, []);
 
   // エラーを受け取ってわかりやすい日本語メッセージに変換する
+  // expo-speech-recognition のエラーコードに対応
   const handleError = useCallback((err: string) => {
     setIsListening(false);
     setInterimText("");
-    if (err === "not_supported") {
-      setError("お使いのデバイスは音声認識に非対応です");
-    } else if (err === "not-allowed" || err === "permission_denied") {
-      setError("マイクの使用を許可してください");
-    } else if (err === "network") {
-      setError("インターネット接続を確認してください");
-    } else if (err === "no-speech") {
+
+    if (err === "no-speech") {
+      // 無音の場合はエラーではなくステータスをリセットするだけ
       setStatusMessage("マイクボタンを押して開始");
       return;
-    } else {
-      setError(`認識エラー: ${err}`);
     }
+
+    // エラーコードに応じた日本語メッセージを設定する
+    const messages: Record<string, string> = {
+      // マイク・音声認識の許可が拒否された
+      "not-allowed":          "⚙️ 設定 → プライバシー → マイク → Expo Go をオンにしてください",
+      "permission_denied":    "⚙️ 設定 → プライバシー → マイク → Expo Go をオンにしてください",
+      // ネットワーク関連
+      "network":              "📶 インターネット接続を確認してください",
+      // オーディオキャプチャ失敗（マイクが他のアプリに使われている可能性）
+      "audio-capture":        "🎙️ マイクにアクセスできません。他のアプリを閉じてから試してください",
+      // サービス不許可
+      "service-not-allowed":  "⚙️ 設定 → プライバシー → 音声認識 → Expo Go をオンにしてください",
+      // 開始失敗
+      "start-failed":         "🎙️ 音声認識の開始に失敗しました。もう一度お試しください",
+      // 言語非対応
+      "language-not-supported": "🌐 この言語には対応していません。設定から別の言語を選んでください",
+      // 中断
+      "aborted":              "音声認識が中断されました",
+    };
+
+    const message = messages[err] ?? `音声認識エラー（${err}）。もう一度お試しください`;
+    setError(message);
     setStatusMessage("マイクボタンを押して開始");
   }, []);
 
