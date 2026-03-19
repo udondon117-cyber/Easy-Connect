@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "CaptionBridge (キャプションブリッジ)",
+    "name": "CaptionBridge",
     "slug": "caption-bridge",
     "version": "1.0.9",
     "orientation": "portrait",
@@ -21,28 +21,44 @@
       }
     },
     "android": {
+      "package": "com.udona.captionbridge",
+      "versionCode": 9,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
         "SYSTEM_ALERT_WINDOW"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon-v4.png",
+        "backgroundColor": "#0A0A12"
+      }
     },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
-      [
-        "expo-router",
-        {
-          "origin": "https://replit.com/"
-        }
-      ],
+      "expo-router",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 24
+          }
+        }
+      ]
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
-    }
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "737889fa-093b-4dee-9cbe-851f4ad88ae3"
+      }
+    },
+    "owner": "udona"
   }
 }
