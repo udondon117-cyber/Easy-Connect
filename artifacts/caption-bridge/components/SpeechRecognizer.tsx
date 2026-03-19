@@ -337,7 +337,8 @@ export const SpeechRecognizer = forwardRef<SpeechRecognizerRef, Props>(
           onMessage={handleMessage}
           // AndroidのWebViewメディア権限（マイク）を自動で許可する
           // これはネイティブ権限とは別のWebView固有の権限チェック
-          onPermissionRequest={(event) => {
+          // @ts-ignore onPermissionRequestはAndroid専用のWebViewプロパティ（型定義に未掲載）
+          onPermissionRequest={(event: any) => {
             event.nativeEvent.grant(event.nativeEvent.resources);
           }}
           mediaPlaybackRequiresUserAction={false}

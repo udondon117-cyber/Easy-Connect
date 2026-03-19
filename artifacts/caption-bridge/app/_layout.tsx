@@ -83,6 +83,7 @@ export default function RootLayout() {
                 <Stack.Screen name="history" />
                 <Stack.Screen name="accessibility" />
                 <Stack.Screen name="about" />
+                <Stack.Screen name="auracast" />
               </Stack>
             </GestureHandlerRootView>
           </CaptionProvider>

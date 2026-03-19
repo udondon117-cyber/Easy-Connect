@@ -14,6 +14,7 @@ import * as FileSystem from "expo-file-system";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import SongPopup, { SongInfo } from "@/components/SongPopup";
 import {
+  Alert,
   Animated,
   PanResponder,
   Platform,
@@ -40,6 +41,7 @@ import Colors from "@/constants/colors";
 import { SpeechRecognizer, SpeechRecognizerRef } from "@/components/SpeechRecognizer";
 import { CaptionEntry, useCaptionContext } from "@/contexts/CaptionContext";
 import { useOverlay } from "@/hooks/useOverlay";
+import { useAudioCapture } from "@/hooks/useAudioCapture";
 
 // ============================================================
 // メイン画面コンポーネント
@@ -61,6 +63,10 @@ export default function MainScreen() {
   // リアルタイム音量レベル（5バンド、0〜1）
   const [audioLevels, setAudioLevels] = useState<number[]>([0.2, 0.3, 0.25, 0.3, 0.2]);
 
+  // ========== 音声入力モード（マイク / 内部音声） ==========
+  // 'mic' = 外部マイク（デフォルト）/ 'internal' = デバイス内部音声（YouTube等）
+  const [audioSource, setAudioSource] = useState<'mic' | 'internal'>('mic');
+
   // ========== 音楽認識の状態 ==========
   const [showMusicPopup, setShowMusicPopup] = useState(false);
   const [songInfo, setSongInfo] = useState<SongInfo | null>(null);
@@ -73,15 +79,32 @@ export default function MainScreen() {
   // captionsのrefを保持する（handleSpeechEndのsaveSession呼び出しで使用）
   // functional updateの中でsaveSessionを呼ぶとsetState-in-renderエラーになるため
   const captionsRef = useRef<CaptionEntry[]>([]);
+  // 内部音声からの字幕コールバックをrefで保持する（前方参照回避）
+  const internalCaptionCallbackRef = useRef<(text: string) => void>(() => {});
 
   // ========== システムオーバーレイ（他のアプリの上に字幕表示） ==========
   const {
     isSupported: overlaySupported,
     isOverlayActive,
+    hasPermission: overlayHasPermission,
+    requestPermission: overlayRequestPermission,
     showOverlay,
     hideOverlay,
     updateCaption: overlayUpdateCaption,
   } = useOverlay();
+
+  // ========== 内部音声キャプチャ（YouTube等のデバイス内部音声→字幕化） ==========
+  // onCaptionはrefを通してhandleResult（後で定義）と接続する
+  const {
+    isSupported: internalAudioSupported,
+    isCapturing: isInternalCapturing,
+    startCapture: startInternalCapture,
+    stopCapture: stopInternalCapture,
+  } = useAudioCapture({
+    apiDomain: process.env.EXPO_PUBLIC_DOMAIN,
+    onCaption: useCallback((text: string) => internalCaptionCallbackRef.current(text), []),
+    onError: useCallback((err: string) => setError(`内部音声エラー: ${err}`), []),
+  });
 
   // ========== アニメーション値（react-native-reanimated） ==========
   const pulseAnim = useSharedValue(1);
@@ -183,7 +206,7 @@ export default function MainScreen() {
 
   // ========== イベントハンドラー ==========
 
-  // マイクボタン：録音開始/停止の切り替え
+  // マイクボタン：録音開始/停止の切り替え（マイクモード / 内部音声モード対応）
   const handleToggle = useCallback(async () => {
     btnScale.value = withSequence(
       withSpring(0.92, { damping: 10, stiffness: 400 }),
@@ -193,33 +216,52 @@ export default function MainScreen() {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
     if (isListening) {
-      speechRef.current?.stopListening();
+      // ===== 停止 =====
+      if (audioSource === 'internal') {
+        stopInternalCapture();
+      } else {
+        speechRef.current?.stopListening();
+      }
       setIsListening(false);
       setInterimText("");
       setStatusMessage("マイクボタンを押して開始");
     } else {
+      // ===== 開始 =====
       setError(null);
       setInterimText("");
-      setStatusMessage("認識中...");
 
-      // AndroidのOSレベルのマイク権限（RECORD_AUDIO）を先にリクエストする
-      // これをしないとWebViewのWeb Speech APIが "not-allowed" エラーになる
-      if (Platform.OS !== "web") {
-        try {
-          const { status } = await Audio.requestPermissionsAsync();
-          if (status !== "granted") {
-            setError("⚙️ 設定 → アプリ → Expo Go → 権限 → マイク → 許可");
-            setStatusMessage("マイクボタンを押して開始");
-            return;
-          }
-        } catch {
-          // 権限確認に失敗してもとりあえず続ける
+      if (audioSource === 'internal') {
+        // 内部音声モード：MediaProjectionでデバイス内部の音声を字幕化する
+        setStatusMessage("内部音声を字幕化中...");
+        const started = await startInternalCapture();
+        if (started) {
+          setIsListening(true);
+        } else {
+          setStatusMessage("マイクボタンを押して開始");
         }
-      }
+      } else {
+        // マイクモード：外部マイクで音声を字幕化する
+        setStatusMessage("認識中...");
 
-      speechRef.current?.startListening();
+        // AndroidのOSレベルのマイク権限（RECORD_AUDIO）を先にリクエストする
+        // これをしないとWebViewのWeb Speech APIが "not-allowed" エラーになる
+        if (Platform.OS !== "web") {
+          try {
+            const { status } = await Audio.requestPermissionsAsync();
+            if (status !== "granted") {
+              setError("⚙️ 設定 → アプリ → Expo Go → 権限 → マイク → 許可");
+              setStatusMessage("マイクボタンを押して開始");
+              return;
+            }
+          } catch {
+            // 権限確認に失敗してもとりあえず続ける
+          }
+        }
+
+        speechRef.current?.startListening();
+      }
     }
-  }, [isListening]);
+  }, [isListening, audioSource, startInternalCapture, stopInternalCapture]);
 
   // 音声認識開始時の処理
   const handleSpeechStart = useCallback(() => {
@@ -281,6 +323,30 @@ export default function MainScreen() {
       setInterimText(text);
     }
   }, [overlayUpdateCaption]);
+
+  // 内部音声コールバックrefをhandleResultに接続する（前方参照回避のため）
+  useEffect(() => {
+    internalCaptionCallbackRef.current = (text: string) => handleResult(text, true);
+  }, [handleResult]);
+
+  // ========== 起動時：オーバーレイ権限が未許可ならダイアログを表示する ==========
+  useEffect(() => {
+    if (!overlaySupported || overlayHasPermission !== false) return;
+    const timer = setTimeout(() => {
+      Alert.alert(
+        "字幕オーバーレイの権限が必要です",
+        "他のアプリ（YouTube等）の上にリアルタイム字幕を表示するには、「他のアプリの上に重ねて表示」の許可が必要です。\n\n今すぐ設定画面を開きますか？",
+        [
+          { text: "後で", style: "cancel" },
+          {
+            text: "設定を開く",
+            onPress: () => overlayRequestPermission(),
+          },
+        ]
+      );
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [overlaySupported, overlayHasPermission, overlayRequestPermission]);
 
   // エラーを受け取ってわかりやすい日本語メッセージに変換する
   // expo-speech-recognition のエラーコードに対応
@@ -897,6 +963,55 @@ export default function MainScreen() {
       {/* ===== ステータステキスト ===== */}
       <Text style={styles.statusText}>{statusMessage}</Text>
 
+      {/* ===== 音声入力モード切り替え（Android・内部音声対応時のみ表示） ===== */}
+      {internalAudioSupported && (
+        <View style={styles.audioSourceToggle}>
+          <TouchableOpacity
+            style={[
+              styles.audioSourceBtn,
+              audioSource === 'mic' && styles.audioSourceBtnActive,
+            ]}
+            onPress={() => {
+              if (isListening) return;
+              setAudioSource('mic');
+            }}
+            disabled={isListening}
+          >
+            <Ionicons
+              name="mic-outline"
+              size={13}
+              color={audioSource === 'mic' ? Colors.accent : Colors.textMuted}
+            />
+            <Text style={[
+              styles.audioSourceLabel,
+              audioSource === 'mic' && styles.audioSourceLabelActive,
+            ]}>マイク</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.audioSourceBtn,
+              audioSource === 'internal' && styles.audioSourceBtnActive,
+            ]}
+            onPress={() => {
+              if (isListening) return;
+              setAudioSource('internal');
+            }}
+            disabled={isListening}
+          >
+            <MaterialCommunityIcons
+              name="cellphone-sound"
+              size={13}
+              color={audioSource === 'internal' ? Colors.accent : Colors.textMuted}
+            />
+            <Text style={[
+              styles.audioSourceLabel,
+              audioSource === 'internal' && styles.audioSourceLabelActive,
+            ]}>内部音声</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ===== 音楽認識ポップアップ ===== */}
       <SongPopup
         visible={showMusicPopup}
@@ -1143,6 +1258,36 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     textAlign: "center",
     paddingBottom: 8,
+  },
+  // ===== 音声入力モード切り替えトグル =====
+  audioSourceToggle: {
+    flexDirection: "row",
+    alignSelf: "center",
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 8,
+    overflow: "hidden",
+  },
+  audioSourceBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  audioSourceBtnActive: {
+    backgroundColor: "rgba(78,205,196,0.15)",
+  },
+  audioSourceLabel: {
+    fontSize: 12,
+    color: Colors.textMuted,
+  },
+  audioSourceLabelActive: {
+    color: Colors.accent,
+    fontWeight: "600",
   },
   // ===== 入力源インジケーターバー =====
   sourceBar: {

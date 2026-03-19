@@ -1,6 +1,7 @@
 // ============================================================
 // transcribe.ts
-// 役割：内部音声キャプチャからの文字起こしAPIエンドポイント
+// 役割：内部音声→字幕変換エンドポイント
+//       デバイス内部の音声（YouTube等）をキャプチャして字幕テキストに変換する
 //
 // リクエスト形式: POST /api/transcribe
 //   { audioPcmBase64: string, sampleRate?: number, language?: string }
@@ -9,7 +10,7 @@
 //   language: 言語コード（デフォルト "ja"）
 //
 // レスポンス:
-//   { text: string }  ← 文字起こし結果
+//   { text: string }  ← 字幕テキスト
 // ============================================================
 
 import { Router } from "express";
