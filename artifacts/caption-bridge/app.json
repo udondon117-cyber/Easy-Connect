@@ -22,7 +22,7 @@
     },
     "android": {
       "package": "com.udona.captionbridge",
-      "versionCode": 9,
+      "versionCode": 10,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
@@ -40,6 +40,16 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "音声を認識して字幕を表示するためにマイクを使用します。",
+          "speechRecognitionPermission": "音声を認識して字幕を表示するために音声認識機能を使用します。",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
+      ],
       [
         "expo-build-properties",
         {
