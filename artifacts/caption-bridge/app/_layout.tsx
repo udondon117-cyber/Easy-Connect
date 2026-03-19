@@ -31,18 +31,21 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient();
 
 export default function RootLayout() {
-  // TTFファイルへの直接パスでフォントをロードする（.fontプロパティより確実）
+  // TTFファイルへの直接パスでフォントをロードする
+  // 【重要】node_modules パスは pnpm ワークスペースのシムリンク構造上
+  //         Expo Go の Metro バンドラーで解決できない場合がある。
+  //         assets/fonts/ にコピーしたファイルを参照することで確実にロードする。
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_600SemiBold,
     Inter_700Bold,
-    // ベクターアイコンフォントを明示的なパスで指定する
+    // アイコンフォントは assets/fonts/ からロードする（pnpm symlink 問題を回避）
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    'Ionicons': require('@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf'),
+    'Ionicons': require('../assets/fonts/Ionicons.ttf'),
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    'MaterialCommunityIcons': require('@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf'),
+    'MaterialCommunityIcons': require('../assets/fonts/MaterialCommunityIcons.ttf'),
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    'Feather': require('@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Feather.ttf'),
+    'Feather': require('../assets/fonts/Feather.ttf'),
   });
 
   useEffect(() => {
