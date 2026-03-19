@@ -1,74 +1,57 @@
 // ============================================================
 // recognize.ts
-// 役割：音楽認識APIプロキシ（ACRCloud）
+// 役割：音楽認識APIプロキシ（AudD.io）
 //
-// ACRCloudのAPIはHMAC-SHA1署名が必要なため、
-// 秘密情報をサーバーサイドで管理しクライアントに露出させない。
+// AudD.io はHMAC署名不要・登録なしで1日10回まで無料で動く。
+// 本格利用は https://dashboard.audd.io/ で無料アカウント取得（月500回）。
 //
-// 必要な環境変数：
-//   ACRCLOUD_HOST        例: identify-ap-southeast-1.acrcloud.com
-//   ACRCLOUD_ACCESS_KEY  ACRCloudのアクセスキー
-//   ACRCLOUD_ACCESS_SECRET ACRCloudのシークレット
+// オプション環境変数：
+//   AUDD_API_TOKEN  未設定でも動く（1日10回の無料制限あり）
 //
-// ACRCloudの無料アカウント取得：https://www.acrcloud.com/
+// リクエスト形式: POST /api/recognize
+//   { audioBase64: string }  ← m4a を base64 エンコードした文字列
+//
+// レスポンス（AudD.io そのまま）:
+//   { status: "success", result: { title, artist, album, spotify, apple_music, ... } }
+//   { status: "success", result: null }  ← 曲が見つからなかった場合
+//   { status: "error", error: { status: number, message: string } }
 // ============================================================
 
 import { Router } from "express";
-import { createHmac } from "crypto";
 
 const router = Router();
 
-// ACRCloud APIへのプロキシエンドポイント
+// AudD.io 音楽認識プロキシ
 router.post("/recognize", async (req, res) => {
-  const { audioBase64 } = req.body as { audioBase64: string };
-
-  const host = process.env["ACRCLOUD_HOST"];
-  const accessKey = process.env["ACRCLOUD_ACCESS_KEY"];
-  const accessSecret = process.env["ACRCLOUD_ACCESS_SECRET"];
-
-  // 認証情報が未設定の場合は設定不完全エラーを返す
-  if (!host || !accessKey || !accessSecret) {
-    res.status(503).json({
-      error: "music_not_configured",
-      message: "ACRCloudの認証情報が設定されていません。ACRCLOUD_HOST / ACRCLOUD_ACCESS_KEY / ACRCLOUD_ACCESS_SECRET を環境変数に設定してください。",
-    });
-    return;
-  }
+  const { audioBase64 } = req.body as { audioBase64?: string };
 
   if (!audioBase64) {
     res.status(400).json({ error: "audio_required", message: "audioBase64が必要です" });
     return;
   }
 
-  // HMAC-SHA1署名を生成する
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const stringToSign = `POST\n/v1/identify\n${accessKey}\naudio\n1\n${timestamp}`;
-  const signature = createHmac("sha1", accessSecret)
-    .update(stringToSign)
-    .digest("base64");
+  // APIトークンは省略可能（未設定でも1日10回まで動く）
+  const apiToken = process.env["AUDD_API_TOKEN"];
 
-  // base64をバイナリに変換する
+  // base64 をバイナリに変換する
   const audioBuffer = Buffer.from(audioBase64, "base64");
 
-  // multipart/form-dataを手動で構築する（Node.js組み込みFetchのFormDataはバイナリ非対応のため）
-  const boundary = `----FormBoundary${Date.now().toString(36)}`;
+  // multipart/form-data を手動で構築する
+  const boundary = `----AuddBoundary${Date.now().toString(36)}`;
 
-  // テキストフィールドを追加するヘルパー関数
   const textPart = (name: string, value: string): Buffer =>
     Buffer.from(
       `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`
     );
 
   const parts: Buffer[] = [
-    textPart("access_key", accessKey),
-    textPart("sample_bytes", audioBuffer.length.toString()),
-    textPart("timestamp", timestamp),
-    textPart("signature", signature),
-    textPart("data_type", "audio"),
-    textPart("signature_version", "1"),
-    // 音声ファイルのパート
+    // APIトークンがある場合のみ追加する
+    ...(apiToken ? [textPart("api_token", apiToken)] : []),
+    // Spotify・Apple Music の情報も返してもらう（ジャケット写真URLのため）
+    textPart("return", "apple_music,spotify"),
+    // 音声ファイル（m4a）
     Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="sample"; filename="audio.m4a"\r\nContent-Type: audio/x-m4a\r\n\r\n`
+      `--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="audio.m4a"\r\nContent-Type: audio/x-m4a\r\n\r\n`
     ),
     audioBuffer,
     Buffer.from(`\r\n--${boundary}--\r\n`),
@@ -77,7 +60,7 @@ router.post("/recognize", async (req, res) => {
   const body = Buffer.concat(parts);
 
   try {
-    const response = await fetch(`https://${host}/v1/identify`, {
+    const response = await fetch("https://api.audd.io/", {
       method: "POST",
       headers: {
         "Content-Type": `multipart/form-data; boundary=${boundary}`,
@@ -86,13 +69,21 @@ router.post("/recognize", async (req, res) => {
       body,
     });
 
+    if (!response.ok) {
+      res.status(502).json({
+        error: "upstream_error",
+        message: `AudD.ioへのリクエストが失敗しました（HTTP ${response.status}）`,
+      });
+      return;
+    }
+
     const result = await response.json() as Record<string, unknown>;
     res.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(502).json({
-      error: "upstream_error",
-      message: `ACRCloudへのリクエストに失敗しました: ${message}`,
+      error: "network_error",
+      message: `AudD.ioへの接続に失敗しました: ${message}`,
     });
   }
 });

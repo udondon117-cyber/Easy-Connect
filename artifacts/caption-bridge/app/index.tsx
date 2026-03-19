@@ -358,42 +358,64 @@ export default function MainScreen() {
         body: JSON.stringify({ audioBase64: base64 }),
       });
 
+      // AudD.io のレスポンス型
+      // status: "success" | "error"
+      // result: 曲が見つかった場合はオブジェクト、見つからない場合は null
       const data = await response.json() as {
-        status?: { code: number; msg: string };
-        metadata?: { music?: Array<{
+        status: "success" | "error";
+        result?: {
           title?: string;
-          artists?: Array<{ name: string }>;
-          album?: { name: string };
-          external_metadata?: {
-            spotify?: { track?: { id: string } };
-            youtube?: { vid: string };
+          artist?: string;
+          album?: string;
+          song_link?: string;
+          spotify?: {
+            id?: string;
+            external_urls?: { spotify?: string };
+            album?: { images?: Array<{ url: string }> };
           };
-          result_from?: number;
-        }> };
-        error?: string;
-        message?: string;
+          apple_music?: {
+            trackId?: number;
+            url?: string;
+            artwork?: { url?: string };
+          };
+        } | null;
+        error?: { status: number; message: string };
       };
 
-      if (data.error === "music_not_configured") {
-        setMusicError("音楽認識は要設定です。ACRCloudのAPIキーを管理者に確認してください。");
-      } else if (data.status?.code === 0 && data.metadata?.music?.[0]) {
-        const music = data.metadata.music[0];
-        // ジャケット写真URLはACRCloudが直接返さないためSpotifyのCover APIを使う
-        const spotifyId = music.external_metadata?.spotify?.track?.id;
-        const ytVid = music.external_metadata?.youtube?.vid;
-        setSongInfo({
-          title: music.title ?? "不明な曲",
-          artist: music.artists?.[0]?.name ?? "不明なアーティスト",
-          album: music.album?.name ?? "",
-          // SpotifyのEmbed画像URLからジャケットを取得する
-          coverUrl: spotifyId
-            ? `https://open.spotify.com/embed/track/${spotifyId}`
-            : undefined,
-          spotifyId,
-          youtubeVideoId: ytVid,
-        });
+      if (data.status === "error") {
+        // 1日の無料上限（10回）に達した場合の案内
+        const errMsg = data.error?.message ?? "";
+        if (errMsg.includes("limit") || data.error?.status === 901) {
+          setMusicError(
+            "1日の無料上限（10回）に達しました。\n" +
+            "https://dashboard.audd.io/ で無料アカウントを作成すると月500回まで使えます。"
+          );
+        } else {
+          setMusicError(`認識エラー: ${errMsg || "不明なエラー"}`);
+        }
+      } else if (!data.result) {
+        // result が null = 曲が見つからなかった
+        setMusicError("曲が見つかりませんでした。\nスピーカーに近づけてもう一度試してください。");
       } else {
-        setMusicError("曲が見つかりませんでした。もう少し音量を上げて試してください。");
+        const r = data.result;
+        // Spotify のジャケット写真URL（高画質なものを選ぶ）
+        const spotifyImages = r.spotify?.album?.images ?? [];
+        const coverUrl = spotifyImages.length > 0
+          ? spotifyImages[0].url  // 最初の画像が最大サイズ
+          : undefined;
+
+        // Spotify トラックID を URL から取り出す
+        const spotifyUrl = r.spotify?.external_urls?.spotify ?? "";
+        const spotifyIdMatch = spotifyUrl.match(/track\/([A-Za-z0-9]+)/);
+        const spotifyId = spotifyIdMatch?.[1] ?? r.spotify?.id;
+
+        setSongInfo({
+          title: r.title ?? "不明な曲",
+          artist: r.artist ?? "不明なアーティスト",
+          album: r.album ?? "",
+          coverUrl,
+          spotifyId,
+        });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -855,7 +877,7 @@ const styles = StyleSheet.create({
   },
   appSubtitle: {
     fontSize: 13,
-    fontFamily: "Inter_400Regular",
+    // 「キャプションブリッジ」は日本語のためシステムフォントを使う
     color: Colors.accent,
     marginTop: 2,
   },
@@ -900,7 +922,8 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    fontFamily: "Inter_400Regular",
+    // Inter は日本語グリフを含まないため fontFamily を指定しない
+    // Android はシステムフォント（Noto Sans JP など）でフォールバックする
     color: Colors.textMuted,
     textAlign: "center",
     lineHeight: 24,
@@ -945,7 +968,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 13,
-    fontFamily: "Inter_400Regular",
+    // 日本語エラーメッセージのためシステムフォントを使う
     color: Colors.recordingRed,
     flex: 1,
   },
@@ -1170,7 +1193,7 @@ const styles = StyleSheet.create({
   },
   miniStatus: {
     fontSize: 12,
-    fontFamily: "Inter_400Regular",
+    // 日本語ステータステキストのためシステムフォントを使う
     color: Colors.textSecondary,
   },
 });
