@@ -39,6 +39,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { SpeechRecognizer, SpeechRecognizerRef } from "@/components/SpeechRecognizer";
 import { CaptionEntry, useCaptionContext } from "@/contexts/CaptionContext";
+import { useOverlay } from "@/hooks/useOverlay";
 
 // ============================================================
 // メイン画面コンポーネント
@@ -72,6 +73,15 @@ export default function MainScreen() {
   // captionsのrefを保持する（handleSpeechEndのsaveSession呼び出しで使用）
   // functional updateの中でsaveSessionを呼ぶとsetState-in-renderエラーになるため
   const captionsRef = useRef<CaptionEntry[]>([]);
+
+  // ========== システムオーバーレイ（他のアプリの上に字幕表示） ==========
+  const {
+    isSupported: overlaySupported,
+    isOverlayActive,
+    showOverlay,
+    hideOverlay,
+    updateCaption: overlayUpdateCaption,
+  } = useOverlay();
 
   // ========== アニメーション値（react-native-reanimated） ==========
   const pulseAnim = useSharedValue(1);
@@ -243,14 +253,17 @@ export default function MainScreen() {
       const trimmed = text.trim();
       if (!trimmed) return;
 
-      // ===== 重複検出：2秒以内に同じテキストが確定した場合はスキップ =====
-      // Web Speech API は同じフレーズを2回返すことがある（バグ対策）
-      const lastCaption = captionsRef.current[captionsRef.current.length - 1];
-      if (lastCaption) {
-        const lastTime = new Date(lastCaption.timestamp).getTime();
-        const isDuplicate = lastCaption.text === trimmed && (Date.now() - lastTime) < 2000;
-        if (isDuplicate) return;
-      }
+      // ===== 重複検出（強化版）：直近5件のいずれかと完全一致かつ10秒以内ならスキップ =====
+      // Web Speech API は同じフレーズを複数回返すことがある（バグ対策）
+      // 正規化：空白を統一してから比較する
+      const normalized = trimmed.replace(/\s+/g, " ");
+      const recent = captionsRef.current.slice(-5);
+      const isDuplicate = recent.some((c) => {
+        const normalizedC = c.text.replace(/\s+/g, " ");
+        const timeDiff = Date.now() - new Date(c.timestamp).getTime();
+        return normalizedC === normalized && timeDiff < 10000;
+      });
+      if (isDuplicate) return;
 
       // 確定した字幕を追加する
       const entry: CaptionEntry = {
@@ -260,12 +273,14 @@ export default function MainScreen() {
       };
       setCaptions((prev) => [...prev, entry]);
       setInterimText("");
+      // オーバーレイが有効なら最新字幕を更新する
+      overlayUpdateCaption(trimmed);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     } else {
       // 認識中のテキスト（まだ確定していない）
       setInterimText(text);
     }
-  }, []);
+  }, [overlayUpdateCaption]);
 
   // エラーを受け取ってわかりやすい日本語メッセージに変換する
   // expo-speech-recognition のエラーコードに対応
@@ -507,6 +522,22 @@ export default function MainScreen() {
     }
     setIsMiniMode((prev) => !prev);
   }, [isMiniMode]);
+
+  // システムオーバーレイのオン/オフ（他のアプリの上に字幕を表示する）
+  const handleOverlayToggle = useCallback(async () => {
+    if (Platform.OS !== "web") {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    if (isOverlayActive) {
+      hideOverlay();
+    } else {
+      // 現在の最新字幕テキストを初期値として渡す
+      const initial = captionsRef.current.length > 0
+        ? captionsRef.current[captionsRef.current.length - 1].text
+        : "字幕待機中...";
+      await showOverlay(initial);
+    }
+  }, [isOverlayActive, hideOverlay, showOverlay]);
 
   // ========== 計算値 ==========
   const topPad = Platform.OS === "web" ? 67 : insets.top;
@@ -846,6 +877,20 @@ export default function MainScreen() {
           <TouchableOpacity style={styles.smallBtn} onPress={handleToggleMiniMode}>
             <Ionicons name="contract-outline" size={18} color={Colors.accent} />
           </TouchableOpacity>
+
+          {/* システムオーバーレイボタン（Android専用・他のアプリの上に字幕表示） */}
+          {overlaySupported && (
+            <TouchableOpacity
+              style={[styles.smallBtn, isOverlayActive && styles.overlayBtnActive]}
+              onPress={handleOverlayToggle}
+            >
+              <MaterialCommunityIcons
+                name="picture-in-picture-top-right"
+                size={18}
+                color={isOverlayActive ? Colors.accent : Colors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -1208,5 +1253,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "NotoSansJP_400Regular",
     color: Colors.textSecondary,
+  },
+  // ===== システムオーバーレイボタン（アクティブ時） =====
+  overlayBtnActive: {
+    backgroundColor: Colors.accentGlow,
+    borderColor: Colors.accent,
   },
 });

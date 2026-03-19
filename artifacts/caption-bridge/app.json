@@ -2,7 +2,7 @@
   "expo": {
     "name": "CaptionBridge",
     "slug": "caption-bridge",
-    "version": "1.0.9",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon-v4.png",
     "scheme": "caption-bridge",
@@ -22,14 +22,14 @@
     },
     "android": {
       "package": "com.udona.captionbridge",
-      "versionCode": 12,
+      "versionCode": 13,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
         "SYSTEM_ALERT_WINDOW"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/icon-v4.png",
+        "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0A0A12"
       }
     },
@@ -50,6 +50,7 @@
           ]
         }
       ],
+      "./plugins/withOverlay",
       [
         "expo-build-properties",
         {
