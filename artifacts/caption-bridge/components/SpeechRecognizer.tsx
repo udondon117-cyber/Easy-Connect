@@ -37,6 +37,10 @@ const SPEECH_HTML = `<!DOCTYPE html>
   var shouldRestart = false;
   var currentLang = 'ja-JP';
   var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // ===== 重複排除：最後に送信した確定テキストと時刻を記録する =====
+  // Android Web Speech APIは同じフレーズを「確定前」「確定後」で2回送ることがある
+  var lastFinalSent = '';
+  var lastFinalSentTime = 0;
 
   // React Nativeへメッセージを送信する
   function sendMsg(data) {
@@ -165,7 +169,16 @@ const SPEECH_HTML = `<!DOCTYPE html>
         }
       }
       if (finalText) {
-        sendMsg({ type: 'result', text: finalText, isFinal: true });
+        // ===== エンジンレベルの重複排除 =====
+        // Android は「確定前」→「確定後」で同一テキストを2回送る場合がある
+        // 正規化（空白統一）してから3秒以内の完全一致はスキップする
+        var normFinal = finalText.trim().replace(/\s+/g, ' ');
+        var now = Date.now();
+        if (normFinal && !(normFinal === lastFinalSent && now - lastFinalSentTime < 3000)) {
+          lastFinalSent = normFinal;
+          lastFinalSentTime = now;
+          sendMsg({ type: 'result', text: finalText, isFinal: true });
+        }
       }
       if (interim) {
         sendMsg({ type: 'result', text: interim, isFinal: false });
