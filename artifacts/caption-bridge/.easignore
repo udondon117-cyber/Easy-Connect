@@ -1,0 +1,10 @@
+# EAS Build 時に除外するファイル
+# 開発用ファイルはビルドに不要
+.git
+node_modules
+scripts/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__/
