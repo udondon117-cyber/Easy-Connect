@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon-v4.png",
     "scheme": "caption-bridge",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon-v4.png",
       "resizeMode": "contain",
@@ -22,7 +22,7 @@
     },
     "android": {
       "package": "com.udona.captionbridge",
-      "versionCode": 10,
+      "versionCode": 11,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
