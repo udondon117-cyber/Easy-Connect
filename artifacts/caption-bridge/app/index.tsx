@@ -240,10 +240,22 @@ export default function MainScreen() {
   // 音声認識の結果を受け取る
   const handleResult = useCallback((text: string, isFinal: boolean) => {
     if (isFinal) {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+
+      // ===== 重複検出：2秒以内に同じテキストが確定した場合はスキップ =====
+      // Web Speech API は同じフレーズを2回返すことがある（バグ対策）
+      const lastCaption = captionsRef.current[captionsRef.current.length - 1];
+      if (lastCaption) {
+        const lastTime = new Date(lastCaption.timestamp).getTime();
+        const isDuplicate = lastCaption.text === trimmed && (Date.now() - lastTime) < 2000;
+        if (isDuplicate) return;
+      }
+
       // 確定した字幕を追加する
       const entry: CaptionEntry = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-        text: text.trim(),
+        text: trimmed,
         timestamp: new Date().toISOString(),
       };
       setCaptions((prev) => [...prev, entry]);
@@ -877,7 +889,7 @@ const styles = StyleSheet.create({
   },
   appSubtitle: {
     fontSize: 13,
-    // 「キャプションブリッジ」は日本語のためシステムフォントを使う
+    fontFamily: "NotoSansJP_400Regular",
     color: Colors.accent,
     marginTop: 2,
   },
@@ -922,8 +934,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    // Inter は日本語グリフを含まないため fontFamily を指定しない
-    // Android はシステムフォント（Noto Sans JP など）でフォールバックする
+    fontFamily: "NotoSansJP_400Regular",
     color: Colors.textMuted,
     textAlign: "center",
     lineHeight: 24,
@@ -944,6 +955,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(78, 205, 196, 0.06)",
   },
   captionText: {
+    // Noto Sans JP を強制適用（中国語フォントへの誤フォールバックを防ぐ）
+    fontFamily: "NotoSansJP_400Regular",
     lineHeight: 34,
   },
   interimText: {
@@ -968,7 +981,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 13,
-    // 日本語エラーメッセージのためシステムフォントを使う
+    fontFamily: "NotoSansJP_400Regular",
     color: Colors.recordingRed,
     flex: 1,
   },
@@ -1193,7 +1206,7 @@ const styles = StyleSheet.create({
   },
   miniStatus: {
     fontSize: 12,
-    // 日本語ステータステキストのためシステムフォントを使う
+    fontFamily: "NotoSansJP_400Regular",
     color: Colors.textSecondary,
   },
 });

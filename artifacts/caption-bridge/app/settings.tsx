@@ -161,22 +161,70 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* ===== 音声ソース（Expo Go制限の説明）===== */}
+        <Text style={styles.sectionLabel}>音声ソース</Text>
+        <View style={styles.privacyCard}>
+          <View style={styles.privacyRow}>
+            <MaterialCommunityIcons name="microphone-outline" size={20} color={Colors.accent} />
+            <View style={styles.privacyText}>
+              <Text style={styles.privacyTitle}>マイク入力（現在利用中）</Text>
+              <Text style={styles.privacyDesc}>
+                周囲の音声をマイクで拾い、リアルタイムで字幕にします。
+              </Text>
+            </View>
+          </View>
+          <View style={styles.privacyDivider} />
+          <View style={styles.privacyRow}>
+            <MaterialCommunityIcons name="cellphone-sound" size={20} color={Colors.textMuted} />
+            <View style={styles.privacyText}>
+              <Text style={[styles.privacyTitle, { color: Colors.textSecondary }]}>
+                内部音声キャプチャ（近日公開）
+              </Text>
+              <Text style={styles.privacyDesc}>
+                {"ポッドキャスト・動画の再生音を直接字幕化する機能。\nカスタムAPKビルド（EAS Build）が必要です。"}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.privacyDivider} />
+          <View style={styles.privacyRow}>
+            <Feather name="radio" size={20} color={Colors.textMuted} />
+            <View style={styles.privacyText}>
+              <Text style={[styles.privacyTitle, { color: Colors.textSecondary }]}>
+                Auracast対応（将来予定）
+              </Text>
+              <Text style={styles.privacyDesc}>
+                {"補聴器・会場音声をBluetooth LE Audioで受信して字幕化。\n専用ハードウェアと開発版アプリが必要です。"}
+              </Text>
+            </View>
+          </View>
+        </View>
+
         {/* ===== アプリ情報 ===== */}
         <Text style={styles.sectionLabel}>アプリについて</Text>
         <View style={styles.card}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>アプリ名</Text>
-            <Text style={styles.infoValue}>CaptionBridge</Text>
-          </View>
+          {/* About 画面へのリンク */}
+          <Pressable
+            style={({ pressed }) => [styles.navRow, pressed && styles.rowPressed]}
+            onPress={() => router.push("/about")}
+          >
+            <View style={[styles.navIcon, { backgroundColor: "rgba(78, 205, 196, 0.15)" }]}>
+              <Ionicons name="heart-outline" size={20} color={Colors.accent} />
+            </View>
+            <View style={styles.navTextGroup}>
+              <Text style={styles.navLabel}>このアプリについて</Text>
+              <Text style={styles.navDesc}>コンセプト・機能・今後の予定</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+          </Pressable>
           <View style={styles.divider} />
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>バージョン</Text>
-            <Text style={styles.infoValue}>1.0.0</Text>
+            <Text style={styles.infoValue}>1.0.8</Text>
           </View>
           <View style={styles.divider} />
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>対象</Text>
-            <Text style={styles.infoValue}>高齢者・障害者向けアクセシビリティ</Text>
+            <Text style={styles.infoValue}>音や言葉の壁に直面するすべての人へ</Text>
           </View>
         </View>
 

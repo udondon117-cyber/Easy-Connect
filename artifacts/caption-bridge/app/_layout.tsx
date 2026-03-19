@@ -14,6 +14,10 @@ import {
   Inter_600SemiBold,
   Inter_700Bold,
 } from "@expo-google-fonts/inter";
+import {
+  NotoSansJP_400Regular,
+  NotoSansJP_700Bold,
+} from "@expo-google-fonts/noto-sans-jp";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
@@ -39,6 +43,9 @@ export default function RootLayout() {
     Inter_400Regular,
     Inter_600SemiBold,
     Inter_700Bold,
+    // 日本語フォント（中国語フォントへの誤フォールバックを防ぐ）
+    NotoSansJP_400Regular,
+    NotoSansJP_700Bold,
     // アイコンフォントは assets/fonts/ からロードする（pnpm symlink 問題を回避）
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     'Ionicons': require('../assets/fonts/Ionicons.ttf'),
@@ -75,6 +82,7 @@ export default function RootLayout() {
                 <Stack.Screen name="settings" />
                 <Stack.Screen name="history" />
                 <Stack.Screen name="accessibility" />
+                <Stack.Screen name="about" />
               </Stack>
             </GestureHandlerRootView>
           </CaptionProvider>
