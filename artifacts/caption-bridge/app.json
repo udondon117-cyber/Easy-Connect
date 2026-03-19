@@ -22,7 +22,7 @@
     },
     "android": {
       "package": "com.udona.captionbridge",
-      "versionCode": 11,
+      "versionCode": 12,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
@@ -57,7 +57,7 @@
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
             "minSdkVersion": 24,
-            "kotlinVersion": "1.9.24"
+            "architectures": ["arm64-v8a"]
           }
         }
       ]
