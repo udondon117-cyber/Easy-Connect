@@ -72,6 +72,7 @@ export default function MainScreen() {
   const [songInfo, setSongInfo] = useState<SongInfo | null>(null);
   const [isMusicLoading, setIsMusicLoading] = useState(false);
   const [musicError, setMusicError] = useState<string | null>(null);
+  const [musicAudioLevel, setMusicAudioLevel] = useState(0); // 音楽検知用マイク波形レベル
 
   // ========== 参照 ==========
   const scrollRef = useRef<ScrollView>(null);
@@ -145,6 +146,18 @@ export default function MainScreen() {
       },
     })
   ).current;
+
+  // ========== SongPopupをレンダリングする関数 ==========
+  const renderSongPopup = () => (
+    <SongPopup
+      visible={showMusicPopup}
+      song={songInfo}
+      isLoading={isMusicLoading}
+      errorMessage={musicError}
+      audioLevel={musicAudioLevel}
+      onClose={() => setShowMusicPopup(false)}
+    />
+  );
 
   // ========== アプリ起動時の処理 ==========
   // マイク許可はWebViewのWeb Speech API開始時にAndroidが自動でダイアログを表示する
@@ -423,10 +436,21 @@ export default function MainScreen() {
       );
       recording = rec;
 
+      // 音量レベルを取得するための設定を行う
+      recording.setOnRecordingStatusUpdate((status) => {
+        if (status.isRecording && status.metering !== undefined) {
+          // metering は通常 -160dB(無音) から 0dB(最大) の範囲
+          const minDb = -60;
+          const level = Math.max(0, (status.metering - minDb) / Math.abs(minDb));
+          setMusicAudioLevel(level);
+        }
+      });
+
       // 6秒間録音する
       await new Promise<void>((resolve) => setTimeout(resolve, 6000));
 
       // 録音を停止してファイルを取得する
+      recording.setOnRecordingStatusUpdate(null);
       await recording.stopAndUnloadAsync();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 
@@ -776,8 +800,7 @@ export default function MainScreen() {
               size={48}
               color={Colors.textMuted}
             />
-            <Text style={styles.emptyText}>音声を認識すると</Text>
-            <Text style={styles.emptyText}>ここに字幕が表示されます</Text>
+            <Text style={styles.emptyText}>字幕待機中</Text>
           </View>
         ) : (
           <ScrollView
@@ -1013,13 +1036,7 @@ export default function MainScreen() {
       )}
 
       {/* ===== 音楽認識ポップアップ ===== */}
-      <SongPopup
-        visible={showMusicPopup}
-        song={songInfo}
-        isLoading={isMusicLoading}
-        errorMessage={musicError}
-        onClose={() => setShowMusicPopup(false)}
-      />
+      {renderSongPopup()}
     </View>
   );
 }

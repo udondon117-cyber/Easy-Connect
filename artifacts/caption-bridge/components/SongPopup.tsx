@@ -22,6 +22,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 
 import Colors from "@/constants/colors";
 
@@ -41,6 +46,7 @@ interface Props {
   song: SongInfo | null;
   isLoading: boolean;
   errorMessage: string | null;
+  audioLevel?: number; // 0.0 ~ 1.0 音量レベル
   onClose: () => void;
 }
 
@@ -73,7 +79,16 @@ async function openMusicApp(type: "spotify" | "apple" | "youtube", song: SongInf
   }
 }
 
-export default function SongPopup({ visible, song, isLoading, errorMessage, onClose }: Props) {
+export default function SongPopup({ visible, song, isLoading, errorMessage, audioLevel = 0, onClose }: Props) {
+  // === 波形アニメーション用のスタイル ===
+  const animatedRingStyle = useAnimatedStyle(() => {
+    // audioLevel (0.0~1.0) に基づいてスケールを変化させる (最小1.0 ~ 最大1.3)
+    const scale = 1 + (audioLevel * 0.3);
+    return {
+      transform: [{ scale: withSpring(scale, { damping: 10, stiffness: 200 }) }],
+      opacity: withTiming(isLoading ? 1 : 0, { duration: 300 }),
+    };
+  });
   return (
     <Modal
       visible={visible}
@@ -90,9 +105,11 @@ export default function SongPopup({ visible, song, isLoading, errorMessage, onCl
           {/* ===== ローディング状態 ===== */}
           {isLoading && (
             <View style={styles.loadingContainer}>
-              <View style={styles.scanRing}>
-                <ActivityIndicator size="large" color={Colors.accent} />
-              </View>
+              <Animated.View style={[styles.scanRingWrapper, animatedRingStyle]}>
+                <View style={[styles.scanRing, { borderColor: `rgba(78, 205, 196, ${0.4 + audioLevel * 0.6})` }]} />
+              </Animated.View>
+              <ActivityIndicator size="large" color={Colors.accent} style={styles.absoluteSpinner} />
+              
               <Text style={styles.loadingTitle}>音楽を認識中...</Text>
               <Text style={styles.loadingSubtitle}>6秒間マイクで音を拾っています</Text>
             </View>
@@ -196,20 +213,27 @@ const styles = StyleSheet.create({
     elevation: 20,
   },
 
-  // ローディング
   loadingContainer: {
     alignItems: "center",
     paddingVertical: 16,
     gap: 12,
   },
-  scanRing: {
+  scanRingWrapper: {
     width: 80,
     height: 80,
-    borderRadius: 40,
-    borderWidth: 2,
-    borderColor: Colors.accent,
     alignItems: "center",
     justifyContent: "center",
+  },
+  scanRing: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 40,
+    borderWidth: 4,
+    borderColor: Colors.accent,
+  },
+  absoluteSpinner: {
+    position: "absolute",
+    top: 36, // wrapper内の中心位置目安 (padding等調整必要)
   },
   loadingTitle: {
     fontSize: 18,
