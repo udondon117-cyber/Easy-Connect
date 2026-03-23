@@ -88,7 +88,7 @@ router.post("/transcribe", async (req, res) => {
     const wavBuffer = pcm16ToWav(pcmBuffer, sampleRate);
 
     const wavFile = await toFile(
-      new Blob([wavBuffer], { type: "audio/wav" }),
+      new Blob([wavBuffer as any], { type: "audio/wav" }),
       "audio.wav",
       { type: "audio/wav" }
     );

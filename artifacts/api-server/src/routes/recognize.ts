@@ -66,7 +66,7 @@ router.post("/recognize", async (req, res) => {
         "Content-Type": `multipart/form-data; boundary=${boundary}`,
         "Content-Length": body.length.toString(),
       },
-      body,
+      body: body as any, // TypeScript type incompatibility between Buffer and Uint8Array in some environments
     });
 
     if (!response.ok) {

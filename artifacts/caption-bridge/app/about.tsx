@@ -97,7 +97,7 @@ export default function AboutScreen() {
         {/* メインメッセージカード */}
         <View style={styles.messageCard}>
           <Text style={styles.messageQuote}>
-            {"誰でも直感的に使える、\n究極にシンプルなデザイン。\n\nそのシンプルさが、\n結果として高齢者や難聴者の\n大きな助けになります。"}          </Text>
+            {"誰でも直感的に使える、\n究極にシンプルなデザイン。\n\nそのシンプルさが、\n結果として高齢者や難聴者の\n大きな助けになります。"}
           </Text>
           <View style={styles.messageDivider} />
           <Text style={styles.appName}>CaptionBridge</Text>
