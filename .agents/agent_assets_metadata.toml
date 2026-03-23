@@ -1,0 +1,20 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "dYI1zzKwAza72OqrlHTdp"
+uri = "file://artifacts/caption-bridge/assets/images/icon_orange.png"
+type = "image"
+title = "パターンA：オレンジ＋黒（現在採用中）"
+
+[[outputs]]
+id = "eLscByJVxP2Mabvo99cuc"
+uri = "file://artifacts/caption-bridge/assets/images/icon_blue.png"
+type = "image"
+title = "パターンB：濃紺＋白"
+
+[[outputs]]
+id = "t2ec6-nMD6oNTyyhseX3i"
+uri = "file://artifacts/caption-bridge/assets/images/icon.png"
+type = "image"
+title = "最終アイコン：濃緑背景＋白吹き出し＋線屋耳マーク"
