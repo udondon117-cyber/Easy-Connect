@@ -54,7 +54,11 @@ export function useAudioCapture({
     async (base64Pcm: string) => {
       if (!apiDomain) return;
       try {
-        const url = `https://${apiDomain}/api-server/api/transcribe`;
+        // ローカルIPまたはlocalhostの場合はhttpを使用し、Replitの場合はhttpsを使用する
+        const protocol = (apiDomain.includes("localhost") || /^\d+\.\d+\.\d+\.\d+/.test(apiDomain)) ? "http" : "https";
+        // Replit環境特有のパス "/api-server" を除外し、共通の "/api/transcribe" に統一
+        const cleanDomain = apiDomain.replace(/\/$/, "");
+        const url = `${protocol}://${cleanDomain}/api/transcribe`;
         const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

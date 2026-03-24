@@ -490,9 +490,14 @@ export default function MainScreen() {
       const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" as any });
 
       const apiDomain = process.env.EXPO_PUBLIC_DOMAIN;
-      const apiUrl = apiDomain
-        ? `https://${apiDomain}/api-server/api/recognize`
-        : null;
+      let apiUrl = null;
+      if (apiDomain) {
+        // ローカルIPまたはlocalhostの場合はhttpを使用し、Replitの場合はhttpsを使用する
+        const protocol = (apiDomain.includes("localhost") || /^\d+\.\d+\.\d+\.\d+/.test(apiDomain)) ? "http" : "https";
+        // Replit環境特有のパス "/api-server" を除外し、共通の "/api/recognize" に統一
+        const cleanDomain = apiDomain.replace(/\/$/, "");
+        apiUrl = `${protocol}://${cleanDomain}/api/recognize`;
+      }
 
       if (!apiUrl) throw new Error("APIのURLが設定されていません");
 
